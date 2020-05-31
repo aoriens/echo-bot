@@ -1,7 +1,6 @@
 module Main (main) where
 
 import Control.Monad
-import Lib
 
 main :: IO ()
 main = do
