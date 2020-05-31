@@ -6,7 +6,8 @@ module Main
 
 import Control.Monad
 import Data.Char
-import Data.Text as T
+import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Text.IO as TIO
 import System.IO
 
@@ -16,19 +17,39 @@ main = do
   forever $ do
     TIO.putStr "> "
     hFlush stdout
-    TIO.putStrLn . responseForRequest . decodeRequest =<< TIO.getLine
+    TIO.putStrLn . handleInput =<< TIO.getLine
+  where
+    handleInput = encodeResponse . responseForRequest . decodeRequest
 
 data Request
   = Comment Text
   | HelpCommand
+  | RepeatCommand
 
-responseForRequest :: Request -> Text
-responseForRequest (Comment text) = text
-responseForRequest HelpCommand = "This is usage description"
+data Response
+  = TextResponse Text
+  | MenuResponse Text [Text]
+
+encodeResponse :: Response -> Text
+encodeResponse (TextResponse text) = text
+encodeResponse (MenuResponse text options) =
+  text `T.snoc` '\n' `T.append` formattedOptions
+  where
+    formattedOptions = T.intercalate "\n" $ map formatOption options
+    formatOption opt = "  - " `T.append` opt
+
+responseForRequest :: Request -> Response
+responseForRequest (Comment text) = TextResponse text
+responseForRequest HelpCommand = TextResponse "This is usage description"
+responseForRequest RepeatCommand =
+  MenuResponse "Select the number of repetitions" choices
+  where
+    choices = map (T.pack . show) ([1 .. 5] :: [Int])
 
 decodeRequest :: Text -> Request
 decodeRequest text
   | isCommand "/help" = HelpCommand
+  | isCommand "/repeat" = RepeatCommand
   | otherwise = Comment text
   where
     isCommand cmd = startsWithWord cmd $ T.stripStart text
