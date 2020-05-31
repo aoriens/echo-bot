@@ -1,6 +1,9 @@
-module Main where
+module Main (main) where
 
+import Control.Monad
 import Lib
 
 main :: IO ()
-main = someFunc
+main = do
+  putStrLn "Welcome to the echo-bot"
+  forever $ getLine >>= putStrLn
