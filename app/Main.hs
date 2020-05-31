@@ -1,8 +1,13 @@
-module Main (main) where
+{-# LANGUAGE OverloadedStrings #-}
+
+module Main
+  ( main
+  ) where
 
 import Control.Monad
+import Data.Text.IO as TIO
 
 main :: IO ()
 main = do
-  putStrLn "Welcome to the echo-bot"
-  forever $ getLine >>= putStrLn
+  TIO.putStrLn "Welcome to the echo-bot"
+  forever $ TIO.getLine >>= TIO.putStrLn
