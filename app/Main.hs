@@ -27,7 +27,7 @@ sendRequestToBotAndHandleOutput :: EchoBot.Request -> App ()
 sendRequestToBotAndHandleOutput request = do
   response <- EchoBot.respond request
   case response of
-    EchoBot.OutText outText -> liftIO $ TIO.putStrLn outText
+    EchoBot.OutTexts texts -> liftIO $ mapM_ TIO.putStrLn texts
     EchoBot.OutMenu title opts -> handleMenuResponse title opts
     EchoBot.OutNothing -> pure ()
 
