@@ -21,15 +21,15 @@ app = do
   liftIO $ TIO.putStrLn "Welcome to the echo-bot"
   forever $ do
     input <- liftIO $ getLineWithPrompt "> "
-    sendRequestToBotAndHandleOutput . EchoBot.InMessage $ input
+    sendRequestToBotAndHandleOutput . EchoBot.ReplyRequest $ input
 
 sendRequestToBotAndHandleOutput :: EchoBot.Request -> App ()
 sendRequestToBotAndHandleOutput request = do
   response <- EchoBot.respond request
   case response of
-    EchoBot.OutTexts texts -> liftIO $ mapM_ TIO.putStrLn texts
-    EchoBot.OutMenu title opts -> handleMenuResponse title opts
-    EchoBot.OutNothing -> pure ()
+    EchoBot.RepliesResponse texts -> liftIO $ mapM_ TIO.putStrLn texts
+    EchoBot.MenuResponse title opts -> handleMenuResponse title opts
+    EchoBot.EmptyResponse -> pure ()
 
 getLineWithPrompt :: Text -> IO Text
 getLineWithPrompt prompt = do
@@ -41,7 +41,7 @@ handleMenuResponse :: Text -> [(Text, EchoBot.ChoiceId)] -> App ()
 handleMenuResponse title opts = do
   liftIO . TIO.putStrLn . renderMenu title . map fst $ opts
   choiceId <- liftIO $ readUserChoice "Choice> " opts
-  sendRequestToBotAndHandleOutput . EchoBot.InMenuChoice $ choiceId
+  sendRequestToBotAndHandleOutput . EchoBot.MenuChoiceRequest $ choiceId
 
 readUserChoice :: Text -> [(Text, a)] -> IO a
 readUserChoice prompt opts = go

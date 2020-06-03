@@ -22,13 +22,13 @@ class Monad m =>
   put :: BotState -> m ()
 
 data Request
-  = InMessage Text
-  | InMenuChoice ChoiceId
+  = ReplyRequest Text
+  | MenuChoiceRequest ChoiceId
 
 data Response
-  = OutTexts [Text]
-  | OutMenu Text [(Text, ChoiceId)]
-  | OutNothing
+  = RepliesResponse [Text]
+  | MenuResponse Text [(Text, ChoiceId)]
+  | EmptyResponse
 
 newtype ChoiceId =
   RepetitionCountChoice Int
@@ -42,10 +42,10 @@ makeState :: BotState
 makeState = BotState {stRepetitionCount = 1}
 
 respond :: (Gateway m) => Request -> m Response
-respond (InMenuChoice (RepetitionCountChoice repetitionCount)) =
+respond (MenuChoiceRequest (RepetitionCountChoice repetitionCount)) =
   handleSettingRepetitionCount repetitionCount
-respond (InMessage text)
-  | isCommand "/help" = pure $ OutTexts ["This is usage description"]
+respond (ReplyRequest text)
+  | isCommand "/help" = pure $ RepliesResponse ["This is usage description"]
   | isCommand "/repeat" = handleRepeatCommand
   | otherwise = respondWithEchoedComment text
   where
@@ -55,14 +55,14 @@ handleSettingRepetitionCount :: (Gateway m) => Int -> m Response
 handleSettingRepetitionCount count = do
   s <- get
   put s {stRepetitionCount = count}
-  pure OutNothing
+  pure EmptyResponse
 
 handleRepeatCommand :: (Gateway m) => m Response
 handleRepeatCommand = do
   count <- stRepetitionCount <$> get
-  pure $ OutMenu (title count) choices
+  pure $ MenuResponse (makeTitle count) choices
   where
-    title count =
+    makeTitle count =
       "The current repetition amount is " `T.append` T.pack (show count) `T.append`
       "\nSelect the number of repetitions"
     choices = map (T.pack . show &&& RepetitionCountChoice) [1 .. 5]
@@ -70,7 +70,7 @@ handleRepeatCommand = do
 respondWithEchoedComment :: (Gateway m) => Text -> m Response
 respondWithEchoedComment comment = do
   count <- stRepetitionCount <$> get
-  pure . OutTexts . replicate count $ comment
+  pure . RepliesResponse . replicate count $ comment
 
 startsWithWord :: Text -> Text -> Bool
 startsWithWord word text =
