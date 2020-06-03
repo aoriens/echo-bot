@@ -1,16 +1,25 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module EchoBot
-  ( respond
+  ( makeState
+  , respond
   , Request(..)
   , Response(..)
   , ChoiceId
+  , BotState
+  , Gateway(..)
   ) where
 
 import Control.Arrow
 import Data.Char
 import Data.Text (Text)
 import qualified Data.Text as T
+
+class Monad m =>
+      Gateway m
+  where
+  get :: m BotState
+  put :: BotState -> m ()
 
 data Request
   = InMessage Text
@@ -24,14 +33,38 @@ data Response
 newtype ChoiceId =
   RepetitionCountChoice Int
 
-respond :: Request -> Response
-respond (InMenuChoice (RepetitionCountChoice _)) = OutNothing
+newtype BotState =
+  BotState
+    { stRepetitionCount :: Int
+    }
+
+makeState :: BotState
+makeState = BotState {stRepetitionCount = 1}
+
+respond :: (Gateway m) => Request -> m Response
+respond (InMenuChoice (RepetitionCountChoice repetitionCount)) =
+  handleSettingRepetitionCount repetitionCount
 respond (InMessage text)
-  | isCommand "/help" = OutText "This is usage description"
-  | isCommand "/repeat" = OutMenu "Select the number of repetitions" choices
-  | otherwise = OutText text
+  | isCommand "/help" = pure $ OutText "This is usage description"
+  | isCommand "/repeat" = handleRepeatCommand
+  | otherwise = pure $ OutText text
   where
     isCommand cmd = startsWithWord cmd $ T.stripStart text
+
+handleSettingRepetitionCount :: (Gateway m) => Int -> m Response
+handleSettingRepetitionCount count = do
+  s <- get
+  put s {stRepetitionCount = count}
+  pure OutNothing
+
+handleRepeatCommand :: (Gateway m) => m Response
+handleRepeatCommand = do
+  count <- stRepetitionCount <$> get
+  pure $ OutMenu (title count) choices
+  where
+    title count =
+      "The current repetition amount is " `T.append` T.pack (show count) `T.append`
+      "\nSelect the number of repetitions"
     choices = map (T.pack . show &&& RepetitionCountChoice) [1 .. 5]
 
 startsWithWord :: Text -> Text -> Bool

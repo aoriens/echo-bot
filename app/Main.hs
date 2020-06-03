@@ -4,7 +4,9 @@ module Main
   ( main
   ) where
 
+import App
 import Control.Monad
+import Control.Monad.IO.Class
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.IO as TIO
@@ -12,16 +14,20 @@ import qualified EchoBot
 import System.IO
 
 main :: IO ()
-main = do
-  TIO.putStrLn "Welcome to the echo-bot"
-  forever $ do
-    input <- getLineWithPrompt "> "
-    handleBotOutput . EchoBot.respond . EchoBot.InMessage $ input
+main = runApp app $ AppState {botState = EchoBot.makeState}
 
-handleBotOutput :: EchoBot.Response -> IO ()
-handleBotOutput response = do
+app :: App ()
+app = do
+  liftIO $ TIO.putStrLn "Welcome to the echo-bot"
+  forever $ do
+    input <- liftIO $ getLineWithPrompt "> "
+    sendRequestToBotAndHandleOutput . EchoBot.InMessage $ input
+
+sendRequestToBotAndHandleOutput :: EchoBot.Request -> App ()
+sendRequestToBotAndHandleOutput request = do
+  response <- EchoBot.respond request
   case response of
-    EchoBot.OutText outText -> TIO.putStrLn outText
+    EchoBot.OutText outText -> liftIO $ TIO.putStrLn outText
     EchoBot.OutMenu title opts -> handleMenuResponse title opts
     EchoBot.OutNothing -> pure ()
 
@@ -31,11 +37,11 @@ getLineWithPrompt prompt = do
   hFlush stdout
   TIO.getLine
 
-handleMenuResponse :: Text -> [(Text, EchoBot.ChoiceId)] -> IO ()
+handleMenuResponse :: Text -> [(Text, EchoBot.ChoiceId)] -> App ()
 handleMenuResponse title opts = do
-  TIO.putStrLn . renderMenu title . map fst $ opts
-  choiceId <- readUserChoice "Choice> " opts
-  handleBotOutput . EchoBot.respond . EchoBot.InMenuChoice $ choiceId
+  liftIO . TIO.putStrLn . renderMenu title . map fst $ opts
+  choiceId <- liftIO $ readUserChoice "Choice> " opts
+  sendRequestToBotAndHandleOutput . EchoBot.InMenuChoice $ choiceId
 
 readUserChoice :: Text -> [(Text, a)] -> IO a
 readUserChoice prompt opts = go
