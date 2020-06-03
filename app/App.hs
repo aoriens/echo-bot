@@ -9,6 +9,8 @@ module App
 import Control.Monad.State
 import qualified EchoBot
 
+-- | The root monad of the application. It can implement monadic
+-- dependencies needed by other high-level modules, and IO.
 newtype App a =
   App (StateT AppState IO a)
   deriving (Functor, Applicative, Monad, MonadIO)
