@@ -86,8 +86,8 @@ handleRepeatCommand = do
   pure $ MenuResponse (makeTitle count) choices
   where
     makeTitle count =
-      "The current repetition amount is " `T.append` T.pack (show count) `T.append`
-      "\nSelect the number of repetitions"
+      "The current repetition amount is " <>
+      T.pack (show count) <> "\nSelect the number of repetitions"
     choices = map (T.pack . show &&& RepetitionCountChoice) [1 .. 5]
 
 respondWithEchoedComment :: (Gateway m) => Text -> m Response

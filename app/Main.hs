@@ -51,7 +51,7 @@ readUserChoice prompt opts = go
       maybe go pure $ lookup (T.strip input) opts
 
 renderMenu :: Text -> [Text] -> Text
-renderMenu title options = title `T.snoc` '\n' `T.append` formattedOptions
+renderMenu title options = title <> "\n" <> formattedOptions
   where
     formattedOptions = T.intercalate "\n" . map formatOption $ options
-    formatOption text = "  - " `T.append` text
+    formatOption text = "  - " <> text
