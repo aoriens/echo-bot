@@ -2,27 +2,31 @@
 
 module App
   ( App
-  , AppState(..)
+  , Env(..)
   , runApp
   ) where
 
-import Control.Monad.State
+import Control.Monad.Reader
+import Data.IORef
 import qualified EchoBot
 
 -- | The root monad of the application. It can implement monadic
 -- dependencies needed by other high-level modules, and IO.
 newtype App a =
-  App (StateT AppState IO a)
+  App (ReaderT Env IO a)
   deriving (Functor, Applicative, Monad, MonadIO)
 
-newtype AppState =
-  AppState
-    { botState :: EchoBot.BotState
+newtype Env =
+  Env
+    { envBotState :: IORef EchoBot.BotState
     }
 
-runApp :: App a -> AppState -> IO a
-runApp (App anApp) = evalStateT anApp
+runApp :: App a -> Env -> IO a
+runApp (App anApp) = runReaderT anApp
 
 instance EchoBot.Gateway App where
-  getState = App $ gets botState
-  modifyState' f = App . modify' $ \s -> s {botState = f $! botState $ s}
+  getState = App $ asks envBotState >>= liftIO . readIORef
+  modifyState' f =
+    App $ do
+      var <- asks envBotState
+      liftIO $ modifyIORef' var f

@@ -7,6 +7,7 @@ module Main
 import App
 import Control.Monad
 import Control.Monad.IO.Class
+import Data.IORef
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.IO as TIO
@@ -14,7 +15,9 @@ import qualified EchoBot
 import System.IO
 
 main :: IO ()
-main = runApp app $ AppState {botState = EchoBot.makeState}
+main = do
+  botState <- newIORef EchoBot.makeState
+  runApp app Env {envBotState = botState}
 
 app :: App ()
 app = do
