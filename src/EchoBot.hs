@@ -24,8 +24,8 @@ import qualified Data.Text as T
 class Monad m =>
       Gateway m
   where
-  get :: m BotState
-  put :: BotState -> m ()
+  getState :: m BotState
+  modifyState' :: (BotState -> BotState) -> m ()
 
 -- | An action taken by the user that the bot should respond.
 data Request
@@ -76,13 +76,12 @@ respond (ReplyRequest text)
 
 handleSettingRepetitionCount :: (Gateway m) => Int -> m Response
 handleSettingRepetitionCount count = do
-  s <- get
-  put s {stRepetitionCount = count}
+  modifyState' $ \s -> s {stRepetitionCount = count}
   pure EmptyResponse
 
 handleRepeatCommand :: (Gateway m) => m Response
 handleRepeatCommand = do
-  count <- stRepetitionCount <$> get
+  count <- stRepetitionCount <$> getState
   pure $ MenuResponse (makeTitle count) choices
   where
     makeTitle count =
@@ -92,7 +91,7 @@ handleRepeatCommand = do
 
 respondWithEchoedComment :: (Gateway m) => Text -> m Response
 respondWithEchoedComment comment = do
-  count <- stRepetitionCount <$> get
+  count <- stRepetitionCount <$> getState
   pure . RepliesResponse . replicate count $ comment
 
 -- | Determines whether the text starts with a given word. A word is

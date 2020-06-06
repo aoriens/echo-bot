@@ -24,5 +24,5 @@ runApp :: App a -> AppState -> IO a
 runApp (App anApp) = evalStateT anApp
 
 instance EchoBot.Gateway App where
-  get = App $ gets botState
-  put x = App . modify' $ \s -> s {botState = x}
+  getState = App $ gets botState
+  modifyState' f = App . modify' $ \s -> s {botState = f $! botState $ s}
