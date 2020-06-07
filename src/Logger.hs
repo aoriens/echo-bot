@@ -23,6 +23,7 @@ data Level
   | Info
   | Warning
   | Error
+  deriving (Show, Eq, Ord)
 
 debug, info, warn, error :: (Monad m) => Handle m -> T.Text -> m ()
 debug h = log h Debug
