@@ -80,11 +80,11 @@ handleHelpCommand h = do
 handleSettingRepetitionCount :: (Monad m) => Handle m -> Int -> m Response
 handleSettingRepetitionCount h count = do
   Logger.info (hLogHandle h) $
-    "User set repetition count to " <> (T.pack $ show count)
+    "User set repetition count to " <> T.pack (show count)
   when (count < minRepetitionCount || count > maxRepetitionCount) $ do
     Logger.warn (hLogHandle h) $
       "Suspicious new repetition count to be set, too little or large: " <>
-      (T.pack $ show count)
+      T.pack (show count)
   hModifyState h $ \s -> s {stRepetitionCount = count}
   pure EmptyResponse
 
