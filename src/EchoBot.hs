@@ -63,11 +63,14 @@ respond :: (Monad m) => Handle m -> Request -> m Response
 respond h (MenuChoiceRequest (RepetitionCountChoice repetitionCount)) =
   handleSettingRepetitionCount h repetitionCount
 respond h (ReplyRequest text)
-  | isCommand "/help" = pure $ RepliesResponse ["This is usage description"]
+  | isCommand "/help" = handleHelpCommand h
   | isCommand "/repeat" = handleRepeatCommand h
   | otherwise = respondWithEchoedComment h text
   where
     isCommand cmd = startsWithWord cmd $ T.stripStart text
+
+handleHelpCommand :: (Monad m) => Handle m -> m Response
+handleHelpCommand _ = pure $ RepliesResponse ["This is usage description"]
 
 handleSettingRepetitionCount :: (Monad m) => Handle m -> Int -> m Response
 handleSettingRepetitionCount h count = do
