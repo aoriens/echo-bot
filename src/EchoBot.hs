@@ -11,15 +11,18 @@ module EchoBot
   ) where
 
 import Control.Arrow
+import Control.Monad
 import Data.Char
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Logger
 
 -- | The bot dependencies to be satisfied by the caller.
 data Handle m =
   Handle
     { hGetState :: m BotState
     , hModifyState :: (BotState -> BotState) -> m ()
+    , hLogHandle :: Logger.Handle m
     }
 
 -- | An action taken by the user that the bot should respond.
@@ -70,26 +73,46 @@ respond h (ReplyRequest text)
     isCommand cmd = startsWithWord cmd $ T.stripStart text
 
 handleHelpCommand :: (Monad m) => Handle m -> m Response
-handleHelpCommand _ = pure $ RepliesResponse ["This is usage description"]
+handleHelpCommand h = do
+  Logger.info (hLogHandle h) "Got help command"
+  pure $ RepliesResponse ["This is usage description"]
 
 handleSettingRepetitionCount :: (Monad m) => Handle m -> Int -> m Response
 handleSettingRepetitionCount h count = do
+  Logger.info (hLogHandle h) $
+    "User set repetition count to " <> (T.pack $ show count)
+  when (count < minRepetitionCount || count > maxRepetitionCount) $ do
+    Logger.warn (hLogHandle h) $
+      "Suspicious new repetition count to be set, too little or large: " <>
+      (T.pack $ show count)
   hModifyState h $ \s -> s {stRepetitionCount = count}
   pure EmptyResponse
 
 handleRepeatCommand :: (Monad m) => Handle m -> m Response
 handleRepeatCommand h = do
+  Logger.info (hLogHandle h) "Got repeat command"
   count <- stRepetitionCount <$> hGetState h
   pure $ MenuResponse (makeTitle count) choices
   where
     makeTitle count =
       "The current repetition amount is " <>
       T.pack (show count) <> "\nSelect the number of repetitions"
-    choices = map (T.pack . show &&& RepetitionCountChoice) [1 .. 5]
+    choices =
+      map
+        (T.pack . show &&& RepetitionCountChoice)
+        [minRepetitionCount .. maxRepetitionCount]
+
+minRepetitionCount, maxRepetitionCount :: Int
+minRepetitionCount = 1
+
+maxRepetitionCount = 5
 
 respondWithEchoedComment :: (Monad m) => Handle m -> Text -> m Response
 respondWithEchoedComment h comment = do
+  Logger.info (hLogHandle h) $ "Echoing user input: '" <> comment <> "'"
   count <- stRepetitionCount <$> hGetState h
+  Logger.debug (hLogHandle h) $
+    "Current repetition count is " <> T.pack (show count)
   pure . RepliesResponse . replicate count $ comment
 
 -- | Determines whether the text starts with a given word. A word is
