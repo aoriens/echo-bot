@@ -4,7 +4,6 @@ module Main
   ( main
   ) where
 
-import App
 import Data.IORef
 import qualified EchoBot
 import qualified FrontEnd.Console
@@ -12,4 +11,11 @@ import qualified FrontEnd.Console
 main :: IO ()
 main = do
   botState <- newIORef EchoBot.makeState
-  runApp FrontEnd.Console.run Env {envBotState = botState}
+  FrontEnd.Console.run $
+    FrontEnd.Console.Handle
+      { FrontEnd.Console.hBotHandle =
+          EchoBot.Handle
+            { EchoBot.hGetState = readIORef botState
+            , EchoBot.hModifyState = modifyIORef' botState
+            }
+      }

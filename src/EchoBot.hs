@@ -7,7 +7,7 @@ module EchoBot
   , Response(..)
   , ChoiceId
   , BotState
-  , Gateway(..)
+  , Handle(..)
   ) where
 
 import Control.Arrow
@@ -15,17 +15,12 @@ import Data.Char
 import Data.Text (Text)
 import qualified Data.Text as T
 
--- | The bot gateway: dependencies it needs to be satisfied from the
--- outside world. Currently, it merely describes state manipulation
--- methods that can easily be implemented without type classes and
--- monads at all, but in such a case the client code would have to be
--- bothered to deal with the state explicitly, so I don't think the
--- monadic type class is such a bad idea.
-class Monad m =>
-      Gateway m
-  where
-  getState :: m BotState
-  modifyState' :: (BotState -> BotState) -> m ()
+-- | The bot dependencies to be satisfied by the caller.
+data Handle m =
+  Handle
+    { hGetState :: m BotState
+    , hModifyState :: (BotState -> BotState) -> m ()
+    }
 
 -- | An action taken by the user that the bot should respond.
 data Request
@@ -64,24 +59,24 @@ makeState :: BotState
 makeState = BotState {stRepetitionCount = 1}
 
 -- | Evaluates a response for the passed request.
-respond :: (Gateway m) => Request -> m Response
-respond (MenuChoiceRequest (RepetitionCountChoice repetitionCount)) =
-  handleSettingRepetitionCount repetitionCount
-respond (ReplyRequest text)
+respond :: (Monad m) => Handle m -> Request -> m Response
+respond h (MenuChoiceRequest (RepetitionCountChoice repetitionCount)) =
+  handleSettingRepetitionCount h repetitionCount
+respond h (ReplyRequest text)
   | isCommand "/help" = pure $ RepliesResponse ["This is usage description"]
-  | isCommand "/repeat" = handleRepeatCommand
-  | otherwise = respondWithEchoedComment text
+  | isCommand "/repeat" = handleRepeatCommand h
+  | otherwise = respondWithEchoedComment h text
   where
     isCommand cmd = startsWithWord cmd $ T.stripStart text
 
-handleSettingRepetitionCount :: (Gateway m) => Int -> m Response
-handleSettingRepetitionCount count = do
-  modifyState' $ \s -> s {stRepetitionCount = count}
+handleSettingRepetitionCount :: (Monad m) => Handle m -> Int -> m Response
+handleSettingRepetitionCount h count = do
+  hModifyState h $ \s -> s {stRepetitionCount = count}
   pure EmptyResponse
 
-handleRepeatCommand :: (Gateway m) => m Response
-handleRepeatCommand = do
-  count <- stRepetitionCount <$> getState
+handleRepeatCommand :: (Monad m) => Handle m -> m Response
+handleRepeatCommand h = do
+  count <- stRepetitionCount <$> hGetState h
   pure $ MenuResponse (makeTitle count) choices
   where
     makeTitle count =
@@ -89,9 +84,9 @@ handleRepeatCommand = do
       T.pack (show count) <> "\nSelect the number of repetitions"
     choices = map (T.pack . show &&& RepetitionCountChoice) [1 .. 5]
 
-respondWithEchoedComment :: (Gateway m) => Text -> m Response
-respondWithEchoedComment comment = do
-  count <- stRepetitionCount <$> getState
+respondWithEchoedComment :: (Monad m) => Handle m -> Text -> m Response
+respondWithEchoedComment h comment = do
+  count <- stRepetitionCount <$> hGetState h
   pure . RepliesResponse . replicate count $ comment
 
 -- | Determines whether the text starts with a given word. A word is
