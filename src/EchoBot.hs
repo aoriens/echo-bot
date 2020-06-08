@@ -72,8 +72,16 @@ newtype BotState =
     }
 
 -- | Creates an initial, default bot state.
-makeState :: Config -> BotState
-makeState conf = BotState {stRepetitionCount = confRepetitionCount conf}
+makeState :: Config -> Either Text BotState
+makeState conf = do
+  checkConfig conf
+  pure BotState {stRepetitionCount = confRepetitionCount conf}
+
+checkConfig :: Config -> Either Text ()
+checkConfig conf =
+  if confRepetitionCount conf < 0
+    then Left "The repetition count must not be negative"
+    else Right ()
 
 -- | Evaluates a response for the passed request.
 respond :: (Monad m) => Handle m -> Request -> m Response

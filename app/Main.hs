@@ -5,6 +5,7 @@ module Main
   ) where
 
 import Data.IORef
+import qualified Data.Text as T
 import qualified EchoBot
 import qualified FrontEnd.Console
 import qualified Logger
@@ -26,7 +27,8 @@ logHandle =
 
 getBotHandle :: IO (EchoBot.Handle IO)
 getBotHandle = do
-  botState <- newIORef $ EchoBot.makeState botConfig
+  let initialState = either (error . T.unpack) id $ EchoBot.makeState botConfig
+  botState <- newIORef initialState
   pure
     EchoBot.Handle
       { EchoBot.hGetState = readIORef botState
