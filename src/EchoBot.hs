@@ -8,6 +8,7 @@ module EchoBot
   , ChoiceId
   , BotState
   , Handle(..)
+  , Config(..)
   ) where
 
 import Control.Arrow
@@ -23,6 +24,20 @@ data Handle m =
     { hGetState :: m BotState
     , hModifyState :: (BotState -> BotState) -> m ()
     , hLogHandle :: Logger.Handle m
+    , hConfig :: Config
+    }
+
+-- | The initial configuration of the bot.
+data Config =
+  Config
+      -- | A reply to "help" command
+    { confHelpReply :: Text
+      -- | A reply to "repeat" command. Use @{count}@ as a placeholder
+      -- for the current repetition count.
+    , confRepeatReply :: Text
+      -- | The initial repetition count for echoing messages to start
+      -- with.
+    , confRepetitionCount :: Int
     }
 
 -- | An action taken by the user that the bot should respond.
@@ -56,10 +71,9 @@ newtype BotState =
     { stRepetitionCount :: Int
     }
 
--- | Creates an initial, default bot state. It can be used when no
--- configuration was loaded.
-makeState :: BotState
-makeState = BotState {stRepetitionCount = 1}
+-- | Creates an initial, default bot state.
+makeState :: Config -> BotState
+makeState conf = BotState {stRepetitionCount = confRepetitionCount conf}
 
 -- | Evaluates a response for the passed request.
 respond :: (Monad m) => Handle m -> Request -> m Response
@@ -75,7 +89,7 @@ respond h (ReplyRequest text)
 handleHelpCommand :: (Monad m) => Handle m -> m Response
 handleHelpCommand h = do
   Logger.info (hLogHandle h) "Got help command"
-  pure $ RepliesResponse ["This is usage description"]
+  pure $ RepliesResponse [confHelpReply . hConfig $ h]
 
 handleSettingRepetitionCount :: (Monad m) => Handle m -> Int -> m Response
 handleSettingRepetitionCount h count = do
@@ -91,16 +105,20 @@ handleSettingRepetitionCount h count = do
 handleRepeatCommand :: (Monad m) => Handle m -> m Response
 handleRepeatCommand h = do
   Logger.info (hLogHandle h) "Got repeat command"
-  count <- stRepetitionCount <$> hGetState h
-  pure $ MenuResponse (makeTitle count) choices
+  title <- repeatCommandReply h
+  pure $ MenuResponse title choices
   where
-    makeTitle count =
-      "The current repetition amount is " <>
-      T.pack (show count) <> "\nSelect the number of repetitions"
     choices =
       map
         (T.pack . show &&& RepetitionCountChoice)
         [minRepetitionCount .. maxRepetitionCount]
+
+repeatCommandReply :: (Monad m) => Handle m -> m Text
+repeatCommandReply h = do
+  count <- stRepetitionCount <$> hGetState h
+  let countText = T.pack $ show count
+      template = confRepeatReply $ hConfig h
+  pure $ T.replace "{count}" countText template
 
 minRepetitionCount, maxRepetitionCount :: Int
 minRepetitionCount = 1

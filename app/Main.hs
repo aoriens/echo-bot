@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Main
   ( main
   ) where
@@ -24,10 +26,20 @@ logHandle =
 
 getBotHandle :: IO (EchoBot.Handle IO)
 getBotHandle = do
-  botState <- newIORef EchoBot.makeState
+  botState <- newIORef $ EchoBot.makeState botConfig
   pure
     EchoBot.Handle
       { EchoBot.hGetState = readIORef botState
       , EchoBot.hModifyState = modifyIORef' botState
       , EchoBot.hLogHandle = logHandle
+      , EchoBot.hConfig = botConfig
       }
+
+botConfig :: EchoBot.Config
+botConfig =
+  EchoBot.Config
+    { EchoBot.confHelpReply = "This is usage description"
+    , EchoBot.confRepeatReply =
+        "The current repetition amount is {count}.\nSelect the number of repetitions"
+    , EchoBot.confRepetitionCount = 1
+    }
