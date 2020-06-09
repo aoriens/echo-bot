@@ -1,0 +1,15 @@
+# This is a sample configuration bot file
+#
+core {
+  # A reply for /help command
+  HelpReply = "This is a simple bot who echoes all you messages. You may also use commands: \"/help\" and \"/repeat\""
+
+  # A reply for /repeat command. "{count}" placeholder will be
+  # substituted with the current echo repetition count.
+  RepeatReply = "The current number of repetitions is {count}. Choose a new one"
+
+  # An initial echo repetition count. Note that the user can change it
+  # via menu. It must not be negative, otherwise the program will
+  # fail.
+  EchoRepetitionCount = 2
+}

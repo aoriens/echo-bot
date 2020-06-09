@@ -4,6 +4,7 @@ module Main
   ( main
   ) where
 
+import qualified Config
 import Data.IORef
 import qualified Data.Text as T
 import qualified EchoBot
@@ -27,6 +28,7 @@ logHandle =
 
 getBotHandle :: IO (EchoBot.Handle IO)
 getBotHandle = do
+  botConfig <- Config.getBotConfig
   let initialState = either (error . T.unpack) id $ EchoBot.makeState botConfig
   botState <- newIORef initialState
   pure
@@ -36,12 +38,3 @@ getBotHandle = do
       , EchoBot.hLogHandle = logHandle
       , EchoBot.hConfig = botConfig
       }
-
-botConfig :: EchoBot.Config
-botConfig =
-  EchoBot.Config
-    { EchoBot.confHelpReply = "This is usage description"
-    , EchoBot.confRepeatReply =
-        "The current repetition amount is {count}.\nSelect the number of repetitions"
-    , EchoBot.confRepetitionCount = 1
-    }
