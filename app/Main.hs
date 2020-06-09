@@ -11,7 +11,6 @@ import qualified EchoBot
 import qualified FrontEnd.Console
 import qualified Logger
 import qualified Logger.Impl
-import System.IO
 
 main :: IO ()
 main = do
@@ -20,17 +19,15 @@ main = do
         FrontEnd.Console.Handle {FrontEnd.Console.hBotHandle = botHandle}
   FrontEnd.Console.run consoleFrontEndHandle
 
-logHandle :: Logger.Handle IO
-logHandle =
-  Logger.Impl.new
-    Logger.Impl.Handle
-      {Logger.Impl.hFileHandle = stderr, Logger.Impl.hMinLevel = Logger.Info}
+getLogHandle :: IO (Logger.Handle IO)
+getLogHandle = Logger.Impl.new <$> Config.getLoggerConfig
 
 getBotHandle :: IO (EchoBot.Handle IO)
 getBotHandle = do
   botConfig <- Config.getBotConfig
   let initialState = either (error . T.unpack) id $ EchoBot.makeState botConfig
   botState <- newIORef initialState
+  logHandle <- getLogHandle
   pure
     EchoBot.Handle
       { EchoBot.hGetState = readIORef botState

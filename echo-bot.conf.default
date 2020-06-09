@@ -1,5 +1,4 @@
 # This is a sample configuration bot file
-#
 core {
   # A reply for /help command
   HelpReply = "This is a simple bot who echoes all you messages. You may also use commands: \"/help\" and \"/repeat\""
@@ -12,4 +11,14 @@ core {
   # via menu. It must not be negative, otherwise the program will
   # fail.
   EchoRepetitionCount = 2
+}
+
+log {
+  # The minimum level of messages to output. Available values are:
+  # debug, info, warning, error. Info is a default.
+  Verbosity = "info"
+
+  # The log file path. An empty path means the standard error output,
+  # which is also default.
+  Path = ""
 }
