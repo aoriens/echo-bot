@@ -14,9 +14,22 @@ import System.Environment
 -- | Gets the bot config. In any case it can provide reasonable
 -- default values.
 getBotConfig :: IO EchoBot.Config
-getBotConfig = do
+getBotConfig =
+  withConfigFileSection "core" $ do
+    helpReply <- lookupDefault "HelpReply" "You've entered /help command"
+    repeatReply <- lookupDefault "RepeatReply" "Choose a repetition count"
+    repCount <- lookupDefault "EchoRepetitionCount" 1
+    pure
+      EchoBot.Config
+        { EchoBot.confHelpReply = helpReply
+        , EchoBot.confRepeatReply = repeatReply
+        , EchoBot.confRepetitionCount = repCount
+        }
+
+withConfigFileSection :: C.Name -> ReaderT C.Config IO a -> IO a
+withConfigFileSection section m = do
   rootConf <- loadConfigFile
-  runReaderT extractBotConfig $ C.subconfig "core" rootConf
+  runReaderT m $ C.subconfig section rootConf
 
 loadConfigFile :: IO C.Config
 loadConfigFile = do
@@ -29,18 +42,6 @@ getConfigPaths = do
   case args of
     ("--config":path:_) -> pure [path]
     _ -> pure []
-
-extractBotConfig :: ReaderT C.Config IO EchoBot.Config
-extractBotConfig = do
-  helpReply <- lookupDefault "HelpReply" "You've entered /help command"
-  repeatReply <- lookupDefault "RepeatReply" "Choose a repetition count"
-  repCount <- lookupDefault "EchoRepetitionCount" 1
-  pure
-    EchoBot.Config
-      { EchoBot.confHelpReply = helpReply
-      , EchoBot.confRepeatReply = repeatReply
-      , EchoBot.confRepetitionCount = repCount
-      }
 
 -- | A convenience wrapper for shortening invocations to read config
 -- entries.
