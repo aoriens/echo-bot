@@ -22,8 +22,6 @@ dependencies:
 - base >= 4.7 && < 5
 - text
 - mtl
-- filepath
-- configurator
 
 library:
   source-dirs: src
@@ -38,6 +36,8 @@ executables:
     - -with-rtsopts=-N
     dependencies:
     - echo-bot
+    - filepath
+    - configurator
 
 tests:
   echo-bot-test:
