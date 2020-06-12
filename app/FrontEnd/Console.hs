@@ -41,11 +41,11 @@ getLineWithPrompt prompt = do
   hFlush stdout
   TIO.getLine
 
-handleMenuResponse :: Handle -> Text -> [(Text, EchoBot.ChoiceId)] -> IO ()
+handleMenuResponse :: Handle -> Text -> [(Text, EchoBot.Request)] -> IO ()
 handleMenuResponse h title opts = do
   TIO.putStrLn . renderMenu title . map fst $ opts
-  choiceId <- readUserChoice "Choice> " opts
-  sendRequestToBotAndHandleOutput h . EchoBot.MenuChoiceRequest $ choiceId
+  request <- readUserChoice "Choice> " opts
+  sendRequestToBotAndHandleOutput h request
 
 readUserChoice :: Text -> [(Text, a)] -> IO a
 readUserChoice prompt opts = go

@@ -3,9 +3,8 @@
 module EchoBot
   ( makeState
   , respond
-  , Request(..)
+  , Request(ReplyRequest)
   , Response(..)
-  , ChoiceId
   , State
   , Handle(..)
   , Config(..)
@@ -44,8 +43,11 @@ data Config =
 data Request
   -- | A text comment
   = ReplyRequest Text
-  -- | A choice has been taken in a previously output menu
-  | MenuChoiceRequest ChoiceId
+  -- | Set the repetition count. The constructor is not considered to
+  -- be exported, so that clients could not use it to create requests,
+  -- but values based on it could be returned from the module.
+  | SetRepetitionCountRequest Int
+  deriving (Eq, Show)
 
 -- | Bot reaction to a request.
 data Response
@@ -53,18 +55,10 @@ data Response
   -- element in the list is to be output as a separate message.
   = RepliesResponse [Text]
   -- | A command to output a menu with the given title and options.
-  -- Each option is paired with the corresponding choice identifier.
-  | MenuResponse Text [(Text, ChoiceId)]
+  -- Each option is paired with the corresponding request to perform
+  -- on selection.
+  | MenuResponse Text [(Text, Request)]
   | EmptyResponse
-  deriving (Eq, Show)
-
--- | An opaque type to identify available options in a menu for
--- selection.
-newtype ChoiceId
-  -- | The repetition count identifier, that is used in repetition
-  -- count selection menu. It wraps the repetition count.
-         =
-  RepetitionCountChoice Int
   deriving (Eq, Show)
 
 -- | An intermediate state of the bot.
@@ -87,7 +81,7 @@ checkConfig conf =
 
 -- | Evaluates a response for the passed request.
 respond :: (Monad m) => Handle m -> Request -> m Response
-respond h (MenuChoiceRequest (RepetitionCountChoice repetitionCount)) =
+respond h (SetRepetitionCountRequest repetitionCount) =
   handleSettingRepetitionCount h repetitionCount
 respond h (ReplyRequest text)
   | isCommand "/help" = handleHelpCommand h
@@ -120,7 +114,7 @@ handleRepeatCommand h = do
   where
     choices =
       map
-        (T.pack . show &&& RepetitionCountChoice)
+        (T.pack . show &&& SetRepetitionCountRequest)
         [minRepetitionCount .. maxRepetitionCount]
 
 repeatCommandReply :: (Monad m) => Handle m -> m Text
