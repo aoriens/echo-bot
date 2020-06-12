@@ -6,7 +6,7 @@ module EchoBot
   , Request(..)
   , Response(..)
   , ChoiceId
-  , BotState
+  , State
   , Handle(..)
   , Config(..)
   ) where
@@ -21,8 +21,8 @@ import qualified Logger
 -- | The bot dependencies to be satisfied by the caller.
 data Handle m =
   Handle
-    { hGetState :: m BotState
-    , hModifyState :: (BotState -> BotState) -> m ()
+    { hGetState :: m State
+    , hModifyState :: (State -> State) -> m ()
     , hLogHandle :: Logger.Handle m
     , hConfig :: Config
     }
@@ -66,16 +66,16 @@ newtype ChoiceId
   RepetitionCountChoice Int
 
 -- | An intermediate state of the bot.
-newtype BotState =
-  BotState
+newtype State =
+  State
     { stRepetitionCount :: Int
     }
 
 -- | Creates an initial, default bot state.
-makeState :: Config -> Either Text BotState
+makeState :: Config -> Either Text State
 makeState conf = do
   checkConfig conf
-  pure BotState {stRepetitionCount = confRepetitionCount conf}
+  pure State {stRepetitionCount = confRepetitionCount conf}
 
 checkConfig :: Config -> Either Text ()
 checkConfig conf =
