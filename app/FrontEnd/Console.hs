@@ -9,6 +9,7 @@ module FrontEnd.Console
   ) where
 
 import Control.Monad
+import Data.Bifunctor
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.IO as TIO
@@ -41,10 +42,11 @@ getLineWithPrompt prompt = do
   hFlush stdout
   TIO.getLine
 
-handleMenuResponse :: Handle -> Text -> [(Text, EchoBot.Request)] -> IO ()
+handleMenuResponse :: Handle -> Text -> [(Int, EchoBot.Request)] -> IO ()
 handleMenuResponse h title opts = do
-  TIO.putStrLn . renderMenu title . map fst $ opts
-  request <- readUserChoice "Choice> " opts
+  let textOpts = map (first $ T.pack . show) opts
+  TIO.putStrLn . renderMenu title . map fst $ textOpts
+  request <- readUserChoice "Choice> " textOpts
   sendRequestToBotAndHandleOutput h request
 
 readUserChoice :: Text -> [(Text, a)] -> IO a

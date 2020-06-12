@@ -57,7 +57,7 @@ data Response
   -- | A command to output a menu with the given title and options.
   -- Each option is paired with the corresponding request to perform
   -- on selection.
-  | MenuResponse Text [(Text, Request)]
+  | MenuResponse Text [(Int, Request)]
   | EmptyResponse
   deriving (Eq, Show)
 
@@ -114,7 +114,7 @@ handleRepeatCommand h = do
   where
     choices =
       map
-        (T.pack . show &&& SetRepetitionCountRequest)
+        (id &&& SetRepetitionCountRequest)
         [minRepetitionCount .. maxRepetitionCount]
 
 repeatCommandReply :: (Monad m) => Handle m -> m Text
