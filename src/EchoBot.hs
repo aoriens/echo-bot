@@ -56,6 +56,7 @@ data Response
   -- Each option is paired with the corresponding choice identifier.
   | MenuResponse Text [(Text, ChoiceId)]
   | EmptyResponse
+  deriving (Eq, Show)
 
 -- | An opaque type to identify available options in a menu for
 -- selection.
@@ -64,6 +65,7 @@ newtype ChoiceId
   -- count selection menu. It wraps the repetition count.
          =
   RepetitionCountChoice Int
+  deriving (Eq, Show)
 
 -- | An intermediate state of the bot.
 newtype State =

@@ -1,2 +1,13 @@
+module Main
+  ( main
+  ) where
+
+import Control.Monad
+import Test.HUnit
+import qualified Tests.EchoBot
+
 main :: IO ()
-main = putStrLn "Test suite not yet implemented"
+main = void $ runTestTT tests
+
+tests :: Test
+tests = Tests.EchoBot.tests
