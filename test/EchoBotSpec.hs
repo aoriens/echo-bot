@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Tests.EchoBot
+module EchoBotSpec
   ( tests
   ) where
 

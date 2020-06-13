@@ -4,10 +4,10 @@ module Main
 
 import Control.Monad
 import Test.HUnit
-import qualified Tests.EchoBot
+import qualified EchoBotSpec
 
 main :: IO ()
 main = void $ runTestTT tests
 
 tests :: Test
-tests = Tests.EchoBot.tests
+tests = EchoBotSpec.tests
