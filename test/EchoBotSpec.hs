@@ -20,24 +20,24 @@ spec =
     it "should echo a simple comment" $ do
       let comment = "comment"
       let config = stubConfig
+      let h = handleWith config
       response <-
-        interpret (stateWith config) $
-        respond (handleWith config) (ReplyRequest comment)
+        interpret (stateWith config) $ respond h (ReplyRequest comment)
       response `shouldBe` RepliesResponse [comment]
     it
       "should echo a simple comment for a number of times specified in the config" $ do
       let comment = "comment"
       let repCount = 3
       let config = stubConfig {confRepetitionCount = repCount}
+      let h = handleWith config
       response <-
-        interpret (stateWith config) $
-        respond (handleWith config) (ReplyRequest comment)
+        interpret (stateWith config) $ respond h (ReplyRequest comment)
       response `shouldBe` RepliesResponse (replicate repCount comment)
     it "should output menu for /repeat command" $ do
       let config = stubConfig
+      let h = handleWith config
       response <-
-        interpret (stateWith config) $
-        respond (handleWith config) (ReplyRequest "/repeat")
+        interpret (stateWith config) $ respond h (ReplyRequest "/repeat")
       response `shouldSatisfy` isMenuResponse
     it "should honor the repetition count set by the user" $ do
       let comment = "comment"
