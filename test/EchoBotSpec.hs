@@ -6,12 +6,13 @@ module EchoBotSpec
 
 import Control.Monad
 import qualified Control.Monad.State as S
+import Control.Monad.Writer
 import qualified Data.Text as T
 import EchoBot
 import qualified Logger
 import Test.Hspec
 
-type Interp = S.StateT State IO
+type Interp = WriterT [(Logger.Level, T.Text)] (S.StateT State IO)
 
 spec :: Spec
 spec =
@@ -56,7 +57,10 @@ isMenuResponse (MenuResponse _ _) = True
 isMenuResponse _ = False
 
 interpret :: State -> Interp a -> IO a
-interpret s0 m = S.evalStateT m s0
+interpret s0 m = do
+  (a, logMessages) <- S.evalStateT (runWriterT m) s0
+  logMessages `shouldSatisfy` null
+  pure a
 
 handleWith :: Config -> Handle Interp
 handleWith config =
@@ -67,8 +71,12 @@ handleWith config =
     , hConfig = config
     }
 
-logHandle :: (Applicative m) => Logger.Handle m
-logHandle = Logger.Handle {Logger.log = \_ _ -> pure ()}
+logHandle :: Logger.Handle Interp
+logHandle =
+  Logger.Handle
+    { Logger.log =
+        \level text -> when (level >= Logger.Warning) $ tell [(level, text)]
+    }
 
 stubConfig :: Config
 stubConfig =
