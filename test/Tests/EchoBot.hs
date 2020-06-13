@@ -4,6 +4,7 @@ module Tests.EchoBot
   ( tests
   ) where
 
+import Control.Monad
 import qualified Control.Monad.State as S
 import qualified Data.Text as T
 import EchoBot
@@ -30,6 +31,27 @@ tests =
           interpret (stateWith config) $
           respond (handleWith config) (ReplyRequest comment)
         RepliesResponse (replicate repCount comment) @=? response
+    , "The bot should output menu for /repeat command" ~: do
+        let config = stubConfig
+        response <-
+          interpret (stateWith config) $
+          respond (handleWith config) (ReplyRequest "/repeat")
+        assert $
+          case response of
+            MenuResponse _ _ -> True
+            _ -> False
+    , "The bot should honor the repetition count set by the user" ~: do
+        let comment = "comment"
+        let config = stubConfig {confRepetitionCount = 1}
+        let newRepCount = 3
+        let h = handleWith config
+        response <-
+          interpret (stateWith config) $ do
+            (MenuResponse _ opts) <- respond h $ ReplyRequest "/repeat"
+            Just request <- pure $ lookup newRepCount opts
+            void $ respond h request
+            respond h $ ReplyRequest comment
+        RepliesResponse (replicate newRepCount comment) @=? response
     ]
 
 interpret :: State -> Interp a -> IO a
