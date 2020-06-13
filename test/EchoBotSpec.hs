@@ -51,10 +51,66 @@ spec =
           void $ respond h request
           respond h $ ReplyRequest comment
       response `shouldBe` RepliesResponse (replicate newRepCount comment)
+    it "should output the help text for /help command" $ do
+      let helpText = "My help text"
+      let config = stubConfig {confHelpReply = helpText}
+      let h = handleWith config
+      response <-
+        interpret (stateWith config) $ respond h $ ReplyRequest "/help"
+      response `shouldBe` RepliesResponse [helpText]
+    it "should output the predefined menu title for /repeat command" $ do
+      let title = "My title"
+      let config = stubConfig {confRepeatReply = title}
+      let h = handleWith config
+      response <-
+        interpret (stateWith config) $ respond h $ ReplyRequest "/repeat"
+      response `shouldSatisfy` isMenuResponseWithTitle title
+    it "should substitute {count} with repetition count in the menu title" $ do
+      let config =
+            stubConfig
+              { confRepeatReply = "My count is {count}, {right}."
+              , confRepetitionCount = 3
+              }
+      let h = handleWith config
+      response <-
+        interpret (stateWith config) $ respond h $ ReplyRequest "/repeat"
+      response `shouldSatisfy` isMenuResponseWithTitle "My count is 3, {right}."
+    it "should parse a command with trailing and leading spaces" $ do
+      shouldRecognizeHelpCommand "/help "
+      shouldRecognizeHelpCommand "  /help "
+      shouldRecognizeHelpCommand "  /help"
+    it "should not recognize an unknown command" $ do
+      shouldNotRecognizeHelpCommand "/xhelp"
+      shouldNotRecognizeHelpCommand "/ help"
+      shouldNotRecognizeHelpCommand "/helpx"
+      shouldNotRecognizeHelpCommand "/he lp"
+      shouldNotRecognizeHelpCommand "x/help"
+      shouldNotRecognizeHelpCommand "x /help"
 
 isMenuResponse :: Response -> Bool
 isMenuResponse (MenuResponse _ _) = True
 isMenuResponse _ = False
+
+isMenuResponseWithTitle :: T.Text -> Response -> Bool
+isMenuResponseWithTitle title (MenuResponse t _) = title == t
+isMenuResponseWithTitle _ _ = False
+
+shouldRecognizeHelpCommand :: T.Text -> Expectation
+shouldRecognizeHelpCommand = shouldRecognizeHelpCommandOrNot True
+
+shouldNotRecognizeHelpCommand :: T.Text -> Expectation
+shouldNotRecognizeHelpCommand = shouldRecognizeHelpCommandOrNot False
+
+shouldRecognizeHelpCommandOrNot :: Bool -> T.Text -> Expectation
+shouldRecognizeHelpCommandOrNot matchOrNot input = do
+  let helpText = "Help text, not " <> input
+  let config = stubConfig {confHelpReply = helpText}
+  let h = handleWith config
+  response <- interpret (stateWith config) $ respond h $ ReplyRequest input
+  let expected = RepliesResponse [helpText]
+  if matchOrNot
+    then response `shouldBe` expected
+    else response `shouldNotBe` expected
 
 interpret :: State -> Interp a -> IO a
 interpret s0 m = do
