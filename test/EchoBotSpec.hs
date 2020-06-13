@@ -11,28 +11,34 @@ import qualified Data.Text as T
 import EchoBot
 import qualified Logger
 import Test.Hspec
+import Test.Hspec.QuickCheck
+import Test.QuickCheck
+import Test.QuickCheck.Monadic
 
 type Interp = WriterT [(Logger.Level, T.Text)] (S.StateT State IO)
 
 spec :: Spec
 spec =
   describe "respond" $ do
-    it "should echo a simple comment" $ do
-      let comment = "comment"
-      let config = stubConfig
-      let h = handleWith config
-      response <-
-        interpret (stateWith config) $ respond h (ReplyRequest comment)
-      response `shouldBe` RepliesResponse [comment]
-    it
-      "should echo a simple comment for a number of times specified in the config" $ do
-      let comment = "comment"
-      let repCount = 3
-      let config = stubConfig {confRepetitionCount = repCount}
-      let h = handleWith config
-      response <-
-        interpret (stateWith config) $ respond h (ReplyRequest comment)
-      response `shouldBe` RepliesResponse (replicate repCount comment)
+    prop "should echo any non-command input back" $ \str ->
+      monadicIO $ do
+        pre $ not . hasCommandPrefix $ str
+        let comment = T.pack str
+        let config = stubConfig
+        let h = handleWith config
+        response <-
+          run $ interpret (stateWith config) $ respond h (ReplyRequest comment)
+        assert $ response == RepliesResponse [comment]
+    prop
+      "should echo a simple message for any specified \
+      \amount of times specified in the config" $ \(NonNegative count) ->
+      monadicIO $ do
+        let comment = "comment"
+        let config = stubConfig {confRepetitionCount = count}
+        let h = handleWith config
+        response <-
+          run $ interpret (stateWith config) $ respond h (ReplyRequest comment)
+        assert $ response == RepliesResponse (replicate count comment)
     it "should output menu for /repeat command" $ do
       let config = stubConfig
       let h = handleWith config
@@ -111,6 +117,11 @@ shouldRecognizeHelpCommandOrNot matchOrNot input = do
   if matchOrNot
     then response `shouldBe` expected
     else response `shouldNotBe` expected
+
+hasCommandPrefix :: String -> Bool
+hasCommandPrefix (' ':xs) = hasCommandPrefix xs
+hasCommandPrefix ('/':_) = True
+hasCommandPrefix _ = False
 
 interpret :: State -> Interp a -> IO a
 interpret s0 m = do

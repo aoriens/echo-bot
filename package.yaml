@@ -50,3 +50,4 @@ tests:
     dependencies:
     - echo-bot
     - hspec
+    - QuickCheck
