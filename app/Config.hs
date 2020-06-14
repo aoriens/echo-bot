@@ -6,7 +6,6 @@ module Config
   , getLoggerConfig
   ) where
 
-import Control.Exception
 import Control.Monad.Reader
 import qualified Data.Configurator as C
 import qualified Data.Configurator.Types as C
@@ -15,6 +14,7 @@ import qualified Logger
 import qualified Logger.Impl
 import System.Environment
 import System.IO
+import System.IO.Error
 
 -- | Gets the bot config. In any case it can provide reasonable
 -- default values.
@@ -45,8 +45,8 @@ getLoggerConfig =
 openLogFile :: FilePath -> IO Handle
 openLogFile "" = pure stderr
 openLogFile path = do
-  openFile path AppendMode `catch` \e -> do
-    hPutStrLn stderr $ "Error while opening log: " ++ show (e :: IOException)
+  openFile path AppendMode `catchIOError` \e -> do
+    hPutStrLn stderr $ "Error while opening log: " ++ show e
     pure stderr
 
 withConfigFileSection :: C.Name -> ReaderT C.Config IO a -> IO a
