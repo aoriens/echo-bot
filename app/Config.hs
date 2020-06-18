@@ -4,12 +4,15 @@
 module Config
   ( getBotConfig
   , getLoggerConfig
+  , getTelegramConfig
   ) where
 
 import Control.Monad.Reader
 import qualified Data.Configurator as C
 import qualified Data.Configurator.Types as C
+import qualified Data.Text as T
 import qualified EchoBot
+import qualified FrontEnd.Telegram
 import qualified Logger
 import qualified Logger.Impl
 import System.Environment
@@ -42,6 +45,12 @@ getLoggerConfig =
       Logger.Impl.Handle
         {Logger.Impl.hFileHandle = fileHandle, Logger.Impl.hMinLevel = level}
 
+getTelegramConfig :: IO FrontEnd.Telegram.Config
+getTelegramConfig =
+  withConfigFileSection "telegram" $ do
+    apiToken <- require "ApiToken"
+    pure FrontEnd.Telegram.Config {FrontEnd.Telegram.confApiToken = apiToken}
+
 openLogFile :: FilePath -> IO Handle
 openLogFile "" = pure stderr
 openLogFile path = do
@@ -66,12 +75,16 @@ getConfigPaths = do
     ("--config":path:_) -> pure [path]
     _ -> pure []
 
--- | A convenience wrapper for shortening invocations to read config
--- entries.
 lookupDefault :: (C.Configured a) => C.Name -> a -> ReaderT C.Config IO a
 lookupDefault key def = do
   conf <- ask
   lift $ C.lookupDefault def conf key
+
+require :: (C.Configured a) => C.Name -> ReaderT C.Config IO a
+require key =
+  lookupDefault
+    key
+    (error $ "'" ++ T.unpack key ++ "' must be specified in configuration")
 
 -- | A wrapper type to avoid orphan instance warning
 newtype LogLevelWrapper =

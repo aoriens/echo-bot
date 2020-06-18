@@ -22,3 +22,9 @@ log {
   # which is also default.
   Path = ""
 }
+
+# Telegram front-end configuration
+telegram {
+  # The API token of your telegram bot. Keep it in secret.
+  # ApiToken = "123456789:ABABABABABABABABABABABABABABABABABABABABA"
+}

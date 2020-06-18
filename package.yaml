@@ -38,6 +38,9 @@ executables:
     - echo-bot
     - filepath
     - configurator
+    - req
+    - http-client
+    - aeson
 
 tests:
   echo-bot-test:

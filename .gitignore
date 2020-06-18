@@ -3,3 +3,6 @@
 /*.cabal
 .vscode
 .history
+
+# Configuration and other files containing sensitive data
+/*.private
