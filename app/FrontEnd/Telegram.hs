@@ -45,8 +45,7 @@ receiveMessages :: Handle -> Client.Manager -> IO [Text]
 receiveMessages h httpManager = do
   Logger.debug (hLogHandle h) "Pulling new messages..."
   response <- getResponse
-  let body = Client.responseBody response
-      result = A.parseEither parseMessages =<< A.eitherDecode body
+  let result = eitherJSONFrom response
   logResult result
   pure $ either (const []) id result
   where
@@ -56,6 +55,9 @@ receiveMessages h httpManager = do
     getRequest = do
       request <- Client.requestFromURI $ endpointURI h "getUpdates"
       pure $ Client.setRequestCheckStatus request
+    eitherJSONFrom response = do
+      value <- A.eitherDecode $ Client.responseBody response
+      A.parseEither parseMessages value
     logResult (Left e) =
       Logger.error (hLogHandle h) $ "Response error: " <> T.pack e
     logResult (Right messages) =
