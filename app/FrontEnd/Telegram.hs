@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE DataKinds #-}
 
 module FrontEnd.Telegram
   ( run
@@ -11,14 +10,16 @@ import Control.Monad
 import qualified Data.Aeson as A
 import Data.Aeson ((.:))
 import qualified Data.Aeson.Types as A
+import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Traversable
 import qualified EchoBot
 import qualified Logger
-import Network.HTTP.Client as Client
-import Network.HTTP.Req as Req
+import qualified Network.HTTP.Client as Client
+import qualified Network.HTTP.Client.TLS as TLS
+import qualified Network.URI as URI
 
 newtype Config =
   Config
@@ -34,23 +35,27 @@ data Handle =
 
 run :: Handle -> IO ()
 run h = do
+  httpManager <- Client.newManager TLS.tlsManagerSettings
   forever $ do
-    inputs <- receiveMessages h
+    inputs <- receiveMessages h httpManager
     forM_ inputs $ \input ->
       sendRequestToBotAndHandleOutput h . EchoBot.ReplyRequest $ input
 
-receiveMessages :: Handle -> IO [Text]
-receiveMessages h = do
+receiveMessages :: Handle -> Client.Manager -> IO [Text]
+receiveMessages h httpManager = do
   Logger.debug (hLogHandle h) "Pulling new messages..."
   response <- getResponse
-  let body = Client.responseBody $ toVanillaResponse response
+  let body = Client.responseBody response
       result = A.parseEither parseMessages =<< A.eitherDecode body
   logResult result
   pure $ either (const []) id result
   where
-    getResponse =
-      runReq defaultHttpConfig $
-      req GET (endpointUrl h "getUpdates") NoReqBody lbsResponse mempty
+    getResponse = do
+      request <- getRequest
+      Client.httpLbs request httpManager
+    getRequest = do
+      request <- Client.requestFromURI $ endpointURI h "getUpdates"
+      pure $ Client.setRequestCheckStatus request
     logResult (Left e) =
       Logger.error (hLogHandle h) $ "Response error: " <> T.pack e
     logResult (Right messages) =
@@ -82,8 +87,9 @@ parseMessages =
         message <- event .: "message"
         message .: "text"
 
-endpointUrl :: Handle -> Text -> Url 'Https
-endpointUrl h teleMethod =
-  https "api.telegram.org" /: "bot" <> apiToken /: teleMethod
+endpointURI :: Handle -> String -> URI.URI
+endpointURI h method =
+  fromMaybe (error $ "Bad URI: " ++ uri) . URI.parseURI $ uri
   where
-    apiToken = confApiToken . hConfig $ h
+    uri = "https://api.telegram.org/bot" ++ apiToken ++ "/" ++ method
+    apiToken = T.unpack . confApiToken . hConfig $ h
