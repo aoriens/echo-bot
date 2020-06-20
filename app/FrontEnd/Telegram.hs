@@ -7,9 +7,10 @@ module FrontEnd.Telegram
   ) where
 
 import Control.Arrow
+import Control.Applicative
 import Control.Monad
 import qualified Data.Aeson as A
-import Data.Aeson ((.:), (.:?), (.=))
+import Data.Aeson ((.:), (.=))
 import qualified Data.Aeson.Types as A
 import Data.IORef
 import Data.Maybe
@@ -112,14 +113,10 @@ parseUpdatesResponse =
     parseMessage =
       A.withObject "update" $ \update -> do
         updateId <- update .: "update_id"
-        optMessage <- update .:? "message"
-        case optMessage of
-          Nothing -> pure Nothing
-          Just message -> do
-            optText <- message .: "text"
-            case optText of
-              Nothing -> pure Nothing
-              Just text -> pure $ Just (updateId, text)
+        optional $ do
+          message <- update .: "message"
+          text <- message .: "text"
+          pure (updateId, text)
     retainLastIdOnly :: [(UpdateId, Text)] -> (Maybe UpdateId, [Text])
     retainLastIdOnly = first (listToMaybe . reverse) . unzip
 
