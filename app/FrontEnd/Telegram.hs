@@ -41,8 +41,7 @@ run h = do
   forever $ do
     nextUpdateId <- readIORef nextUpdateIdRef
     (lastId, inputs) <- receiveMessages h httpManager nextUpdateId
-    forM_ inputs $ \input ->
-      sendRequestToBotAndHandleOutput h . EchoBot.ReplyRequest $ input
+    forM_ inputs $ sendRequestToBotAndHandleOutput h . EchoBot.ReplyRequest
     case lastId of
       Nothing -> pure ()
       Just ident -> writeIORef nextUpdateIdRef $ succ ident
