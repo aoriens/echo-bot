@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving #-}
 
 module FrontEnd.Telegram
   ( run
@@ -6,15 +6,16 @@ module FrontEnd.Telegram
   , Config(..)
   ) where
 
+import Control.Arrow
 import Control.Monad
 import qualified Data.Aeson as A
-import Data.Aeson ((.:))
+import Data.Aeson ((.:), (.:?), (.=))
 import qualified Data.Aeson.Types as A
+import Data.IORef
 import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import Data.Traversable
 import qualified EchoBot
 import qualified Logger
 import qualified Network.HTTP.Client as Client
@@ -36,33 +37,51 @@ data Handle =
 run :: Handle -> IO ()
 run h = do
   httpManager <- Client.newManager TLS.tlsManagerSettings
+  nextUpdateIdRef <- newIORef $ UpdateId 0
   forever $ do
-    inputs <- receiveMessages h httpManager
+    nextUpdateId <- readIORef nextUpdateIdRef
+    (lastId, inputs) <- receiveMessages h httpManager nextUpdateId
     forM_ inputs $ \input ->
       sendRequestToBotAndHandleOutput h . EchoBot.ReplyRequest $ input
+    case lastId of
+      Nothing -> pure ()
+      Just ident -> writeIORef nextUpdateIdRef $ succ ident
 
-receiveMessages :: Handle -> Client.Manager -> IO [Text]
-receiveMessages h httpManager = do
-  Logger.debug (hLogHandle h) "Pulling new messages..."
+receiveMessages ::
+     Handle -> Client.Manager -> UpdateId -> IO (Maybe UpdateId, [Text])
+receiveMessages h httpManager nextUpdateId = do
+  Logger.debug (hLogHandle h) $ "getUpdates: " <> T.pack (show requestBody)
   response <- getResponse
-  let result = eitherJSONFrom response
+  Logger.debug (hLogHandle h) $
+    "Responded with " <> T.pack (show $ Client.responseBody response)
+  let result = decodeResponse response
   logResult result
-  pure $ either (const []) id result
+  pure $ either (const (Nothing, [])) id result
   where
     getResponse = do
       request <- getRequest
       Client.httpLbs request httpManager
     getRequest = do
       request <- Client.requestFromURI $ endpointURI h "getUpdates"
-      pure $ Client.setRequestCheckStatus request
-    eitherJSONFrom response = do
+      pure
+        request
+          { Client.checkResponse = Client.throwErrorStatusCodes
+          , Client.method = "POST"
+          , Client.requestHeaders = [("Content-Type", "application/json")]
+          , Client.requestBody = Client.RequestBodyLBS requestBody
+          }
+    requestBody =
+      A.encode $ A.object ["offset" .= nextUpdateId, "timeout" .= (25 :: Int)]
+    decodeResponse response = do
       value <- A.eitherDecode $ Client.responseBody response
-      A.parseEither parseMessages value
+      A.parseEither parseUpdatesResponse value
     logResult (Left e) =
       Logger.error (hLogHandle h) $ "Response error: " <> T.pack e
-    logResult (Right messages) =
+    logResult (Right (maybeId, messages)) = do
       Logger.info (hLogHandle h) $
-      "Received " <> T.pack (show $ length messages) <> " messages"
+        "Received " <> T.pack (show $ length messages) <> " messages"
+      Logger.debug (hLogHandle h) $
+        "Received last update_id=" <> T.pack (show maybeId)
 
 sendRequestToBotAndHandleOutput :: Handle -> EchoBot.Request -> IO ()
 sendRequestToBotAndHandleOutput h request = do
@@ -80,14 +99,30 @@ sendMessages
 sendMenu :: Handle -> Text -> [(Int, EchoBot.Request)] -> IO ()
 sendMenu _ _ _ = undefined
 
-parseMessages :: A.Value -> A.Parser [Text]
-parseMessages =
+newtype UpdateId =
+  UpdateId Int
+  deriving (A.FromJSON, A.ToJSON, Enum, Show)
+
+parseUpdatesResponse :: A.Value -> A.Parser (Maybe UpdateId, [Text])
+parseUpdatesResponse =
   A.withObject "response" $ \r -> do
-    events <- r .: "result"
-    for events $
-      A.withObject "event" $ \event -> do
-        message <- event .: "message"
-        message .: "text"
+    updates <- r .: "result"
+    retainLastIdOnly . catMaybes <$> traverse parseMessage updates
+  where
+    parseMessage :: A.Value -> A.Parser (Maybe (UpdateId, Text))
+    parseMessage =
+      A.withObject "update" $ \update -> do
+        updateId <- update .: "update_id"
+        optMessage <- update .:? "message"
+        case optMessage of
+          Nothing -> pure Nothing
+          Just message -> do
+            optText <- message .: "text"
+            case optText of
+              Nothing -> pure Nothing
+              Just text -> pure $ Just (updateId, text)
+    retainLastIdOnly :: [(UpdateId, Text)] -> (Maybe UpdateId, [Text])
+    retainLastIdOnly = first (listToMaybe . reverse) . unzip
 
 endpointURI :: Handle -> String -> URI.URI
 endpointURI h method =
