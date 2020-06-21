@@ -7,6 +7,7 @@ module Logger.Impl
   ) where
 
 import Control.Monad
+import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Data.Time
@@ -21,21 +22,26 @@ data Handle =
     }
 
 new :: Handle -> Logger.Handle IO
-new h = Logger.Handle {Logger.hLog = log h}
+new h = Logger.Handle {Logger.hLowLevelLog = log h}
 
-log :: Handle -> Logger.Level -> T.Text -> IO ()
-log h level text = do
+log :: Handle -> Logger.Level -> Maybe Logger.CallSite -> T.Text -> IO ()
+log h level callSite text = do
   when (shouldLog h level) $ do
     time <- getCurrentTime
-    TIO.hPutStrLn (hFileHandle h) $ formatMessage level time text
+    TIO.hPutStrLn (hFileHandle h) $ formatMessage level callSite time text
     System.IO.hFlush (hFileHandle h)
 
 shouldLog :: Handle -> Logger.Level -> Bool
 shouldLog h level = hMinLevel h <= level
 
-formatMessage :: Logger.Level -> UTCTime -> T.Text -> T.Text
-formatMessage level time text =
-  timeString <> " | " <> levelString <> " | " <> text
+formatMessage ::
+     Logger.Level -> Maybe Logger.CallSite -> UTCTime -> T.Text -> T.Text
+formatMessage level callSite time text =
+  timeString <> " | " <> levelString <> " | " <> callSiteString <> text
   where
     timeString = T.pack $ formatTime defaultTimeLocale "%F %T.%3q" time
     levelString = T.justifyLeft 7 ' ' $ T.pack (show level)
+    callSiteString = maybe "" formatCallSite callSite
+    formatCallSite cs =
+      "(at " <>
+      Logger.csModule cs <> ":" <> T.pack (show $ Logger.csStartLine cs) <> ") "

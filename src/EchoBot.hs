@@ -150,4 +150,4 @@ startsWithWord word text =
         Just (c, _) -> isSpace c
 
 instance Logger.Logger (Handle m) m where
-  log = Logger.log . hLogHandle
+  lowLevelLog = Logger.lowLevelLog . hLogHandle

@@ -126,4 +126,4 @@ endpointURI h method =
     apiToken = T.unpack . confApiToken . hConfig $ h
 
 instance Logger.Logger Handle IO where
-  log = Logger.log . hLogHandle
+  lowLevelLog = Logger.lowLevelLog . hLogHandle
