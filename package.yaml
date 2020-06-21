@@ -42,6 +42,7 @@ executables:
     - http-client-tls
     - network-uri
     - aeson
+    - time
 
 tests:
   echo-bot-test:
