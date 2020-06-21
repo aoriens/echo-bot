@@ -20,7 +20,7 @@ data Handle =
     }
 
 new :: Handle -> Logger.Handle IO
-new h = Logger.Handle {Logger.log = log h}
+new h = Logger.Handle {Logger.hLog = log h}
 
 log :: Handle -> Logger.Level -> T.Text -> IO ()
 log h level text = do

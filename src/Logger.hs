@@ -1,7 +1,10 @@
+{-# LANGUAGE FlexibleInstances, FunctionalDependencies #-}
+
 -- | The logger interface module. It should not define a specific
 -- implementation.
 module Logger
-  ( Handle(..)
+  ( Logger(..)
+  , Handle(..)
   , Level(..)
   , debug
   , info
@@ -13,10 +16,20 @@ import qualified Data.Text as T
 import Prelude hiding (error, log)
 
 -- | The actual logger implementation is hidden here.
+class Logger t m
+  | t -> m
+  -- | Log a message
+  where
+  log :: t -> Level -> T.Text -> m ()
+
+-- | A flexible implementation of Logger - a Logger class adapter.
 newtype Handle m =
   Handle
-    { log :: Level -> T.Text -> m ()
+    { hLog :: Level -> T.Text -> m ()
     }
+
+instance Logger (Handle m) m where
+  log = hLog
 
 data Level
   = Debug
@@ -25,7 +38,7 @@ data Level
   | Error
   deriving (Show, Eq, Ord)
 
-debug, info, warn, error :: (Monad m) => Handle m -> T.Text -> m ()
+debug, info, warn, error :: (Logger t m) => t -> T.Text -> m ()
 debug h = log h Debug
 
 info h = log h Info
