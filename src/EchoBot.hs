@@ -1,4 +1,5 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, FlexibleInstances,
+  MultiParamTypeClasses #-}
 
 module EchoBot
   ( makeState
@@ -92,15 +93,14 @@ respond h (ReplyRequest text)
 
 handleHelpCommand :: (Monad m) => Handle m -> m Response
 handleHelpCommand h = do
-  Logger.info (hLogHandle h) "Got help command"
+  Logger.info h "Got help command"
   pure $ RepliesResponse [confHelpReply . hConfig $ h]
 
 handleSettingRepetitionCount :: (Monad m) => Handle m -> Int -> m Response
 handleSettingRepetitionCount h count = do
-  Logger.info (hLogHandle h) $
-    "User set repetition count to " <> T.pack (show count)
+  Logger.info h $ "User set repetition count to " <> T.pack (show count)
   when (count < minRepetitionCount || count > maxRepetitionCount) $ do
-    Logger.warn (hLogHandle h) $
+    Logger.warn h $
       "Suspicious new repetition count to be set, too little or large: " <>
       T.pack (show count)
   hModifyState h $ \s -> s {stRepetitionCount = count}
@@ -108,7 +108,7 @@ handleSettingRepetitionCount h count = do
 
 handleRepeatCommand :: (Monad m) => Handle m -> m Response
 handleRepeatCommand h = do
-  Logger.info (hLogHandle h) "Got repeat command"
+  Logger.info h "Got repeat command"
   title <- repeatCommandReply h
   pure $ MenuResponse title choices
   where
@@ -131,10 +131,9 @@ maxRepetitionCount = 5
 
 respondWithEchoedComment :: (Monad m) => Handle m -> Text -> m Response
 respondWithEchoedComment h comment = do
-  Logger.info (hLogHandle h) $ "Echoing user input: '" <> comment <> "'"
+  Logger.info h $ "Echoing user input: '" <> comment <> "'"
   count <- stRepetitionCount <$> hGetState h
-  Logger.debug (hLogHandle h) $
-    "Current repetition count is " <> T.pack (show count)
+  Logger.debug h $ "Current repetition count is " <> T.pack (show count)
   pure . RepliesResponse . replicate count $ comment
 
 -- | Determines whether the text starts with a given word. A word is
@@ -148,3 +147,6 @@ startsWithWord word text =
       case T.uncons rest of
         Nothing -> True
         Just (c, _) -> isSpace c
+
+instance Logger.Logger (Handle m) m where
+  log = Logger.log . hLogHandle
