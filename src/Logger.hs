@@ -10,6 +10,7 @@ module Logger
   , info
   , warn
   , error
+  , (.<)
   ) where
 
 import qualified Data.Text as T
@@ -46,3 +47,10 @@ info h = log h Info
 warn h = log h Warning
 
 error h = log h Error
+
+-- | Concatenate a text and an instance of Show. This is a convenience
+-- function to shorten invocations of logger functions.
+(.<) :: (Show a) => T.Text -> a -> T.Text
+text .< a = text <> T.pack (show a)
+
+infixr 7 .<

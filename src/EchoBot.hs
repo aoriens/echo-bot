@@ -17,6 +17,7 @@ import Data.Char
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Logger
+import Logger ((.<))
 
 -- | The bot dependencies to be satisfied by the caller.
 data Handle m =
@@ -98,11 +99,11 @@ handleHelpCommand h = do
 
 handleSettingRepetitionCount :: (Monad m) => Handle m -> Int -> m Response
 handleSettingRepetitionCount h count = do
-  Logger.info h $ "User set repetition count to " <> T.pack (show count)
+  Logger.info h $ "User set repetition count to " .< count
   when (count < minRepetitionCount || count > maxRepetitionCount) $ do
     Logger.warn h $
-      "Suspicious new repetition count to be set, too little or large: " <>
-      T.pack (show count)
+      "Suspicious new repetition count to be set, too little or large: " .<
+      count
   hModifyState h $ \s -> s {stRepetitionCount = count}
   pure EmptyResponse
 
@@ -133,7 +134,7 @@ respondWithEchoedComment :: (Monad m) => Handle m -> Text -> m Response
 respondWithEchoedComment h comment = do
   Logger.info h $ "Echoing user input: '" <> comment <> "'"
   count <- stRepetitionCount <$> hGetState h
-  Logger.debug h $ "Current repetition count is " <> T.pack (show count)
+  Logger.debug h $ "Current repetition count is " .< count
   pure . RepliesResponse . replicate count $ comment
 
 -- | Determines whether the text starts with a given word. A word is

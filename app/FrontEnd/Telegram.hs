@@ -20,6 +20,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified EchoBot
 import qualified Logger
+import Logger ((.<))
 import qualified Network.HTTP.Client as Client
 import qualified Network.HTTP.Client.TLS as TLS
 import qualified Network.URI as URI
@@ -51,10 +52,9 @@ run h = do
 receiveMessages ::
      Handle -> Client.Manager -> UpdateId -> IO (Maybe UpdateId, [Text])
 receiveMessages h httpManager nextUpdateId = do
-  Logger.debug h $ "getUpdates: " <> T.pack (show requestBody)
+  Logger.debug h $ "getUpdates: " .< requestBody
   response <- getResponse
-  Logger.debug h $
-    "Responded with " <> T.pack (show $ Client.responseBody response)
+  Logger.debug h $ "Responded with " .< Client.responseBody response
   let result = decodeResponse response
   logResult result
   pure $ either (const (Nothing, [])) id result
@@ -78,9 +78,8 @@ receiveMessages h httpManager nextUpdateId = do
       A.parseEither parseUpdatesResponse value
     logResult (Left e) = Logger.error h $ "Response error: " <> T.pack e
     logResult (Right (maybeId, messages)) = do
-      Logger.info h $
-        "Received " <> T.pack (show $ length messages) <> " messages"
-      Logger.debug h $ "Received last update_id=" <> T.pack (show maybeId)
+      Logger.info h $ "Received " .< length messages <> " messages"
+      Logger.debug h $ "Received last update_id=" .< maybeId
 
 sendRequestToBotAndHandleOutput :: Handle -> EchoBot.Request -> IO ()
 sendRequestToBotAndHandleOutput h request = do
