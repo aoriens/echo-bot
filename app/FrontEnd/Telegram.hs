@@ -1,4 +1,5 @@
-{-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving,
+  MultiParamTypeClasses #-}
 
 module FrontEnd.Telegram
   ( run
@@ -50,9 +51,9 @@ run h = do
 receiveMessages ::
      Handle -> Client.Manager -> UpdateId -> IO (Maybe UpdateId, [Text])
 receiveMessages h httpManager nextUpdateId = do
-  Logger.debug (hLogHandle h) $ "getUpdates: " <> T.pack (show requestBody)
+  Logger.debug h $ "getUpdates: " <> T.pack (show requestBody)
   response <- getResponse
-  Logger.debug (hLogHandle h) $
+  Logger.debug h $
     "Responded with " <> T.pack (show $ Client.responseBody response)
   let result = decodeResponse response
   logResult result
@@ -75,13 +76,11 @@ receiveMessages h httpManager nextUpdateId = do
     decodeResponse response = do
       value <- A.eitherDecode $ Client.responseBody response
       A.parseEither parseUpdatesResponse value
-    logResult (Left e) =
-      Logger.error (hLogHandle h) $ "Response error: " <> T.pack e
+    logResult (Left e) = Logger.error h $ "Response error: " <> T.pack e
     logResult (Right (maybeId, messages)) = do
-      Logger.info (hLogHandle h) $
+      Logger.info h $
         "Received " <> T.pack (show $ length messages) <> " messages"
-      Logger.debug (hLogHandle h) $
-        "Received last update_id=" <> T.pack (show maybeId)
+      Logger.debug h $ "Received last update_id=" <> T.pack (show maybeId)
 
 sendRequestToBotAndHandleOutput :: Handle -> EchoBot.Request -> IO ()
 sendRequestToBotAndHandleOutput h request = do
@@ -126,3 +125,6 @@ endpointURI h method =
   where
     uri = "https://api.telegram.org/bot" ++ apiToken ++ "/" ++ method
     apiToken = T.unpack . confApiToken . hConfig $ h
+
+instance Logger.Logger Handle IO where
+  log = Logger.log . hLogHandle
