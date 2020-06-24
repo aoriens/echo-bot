@@ -140,8 +140,8 @@ handleWith config =
 logHandle :: Logger.Handle Interp
 logHandle =
   Logger.Handle
-    { Logger.log =
-        \level text -> when (level >= Logger.Warning) $ tell [(level, text)]
+    { Logger.hLowLevelLog =
+        \level _ text -> when (level >= Logger.Warning) $ tell [(level, text)]
     }
 
 stubConfig :: Config
