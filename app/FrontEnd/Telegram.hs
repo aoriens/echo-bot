@@ -56,7 +56,9 @@ run h = do
     nextUpdateId <- readIORef nextUpdateIdRef
     (lastId, inMessages) <- receiveMessages h nextUpdateId
     forM_ inMessages $ sendMessageToBotAndHandleOutput h
-    writeIORef nextUpdateIdRef $ succ lastId
+    case lastId of
+      Nothing -> pure ()
+      Just ident -> writeIORef nextUpdateIdRef $ succ ident
 
 sendMessageToBotAndHandleOutput :: Handle -> Message -> IO ()
 sendMessageToBotAndHandleOutput h message = do
@@ -71,15 +73,13 @@ sendMessageToBotAndHandleOutput h message = do
   where
     chatId = messageChatId message
 
-receiveMessages :: Handle -> UpdateId -> IO (UpdateId, [Message])
+receiveMessages :: Handle -> UpdateId -> IO (Maybe UpdateId, [Message])
 receiveMessages h nextUpdateId = do
-  result <-
-    getResponseWithMethod
-      h
-      (ApiMethod "getUpdates")
-      (A.object ["offset" .= nextUpdateId, "timeout" .= (25 :: Int)])
-      parseUpdatesResponse
-  pure $ first (fromMaybe nextUpdateId) result
+  getResponseWithMethod
+    h
+    (ApiMethod "getUpdates")
+    (A.object ["offset" .= nextUpdateId, "timeout" .= (25 :: Int)])
+    parseUpdatesResponse
 
 sendMessage :: Handle -> ChatId -> Text -> IO ()
 sendMessage h chatId text = do
