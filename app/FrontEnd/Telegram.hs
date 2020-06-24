@@ -58,6 +58,19 @@ run h = do
     forM_ inMessages $ sendMessageToBotAndHandleOutput h
     writeIORef nextUpdateIdRef $ succ lastId
 
+sendMessageToBotAndHandleOutput :: Handle -> Message -> IO ()
+sendMessageToBotAndHandleOutput h message = do
+  response <-
+    EchoBot.respond (hBotHandle h) . EchoBot.ReplyRequest . messageText $
+    message
+  case response of
+    EchoBot.RepliesResponse texts -> mapM_ (sendMessage h chatId) texts
+    EchoBot.MenuResponse _ _ ->
+      sendMessage h chatId "This command has not implemented already"
+    EchoBot.EmptyResponse -> pure ()
+  where
+    chatId = messageChatId message
+
 receiveMessages :: Handle -> UpdateId -> IO (UpdateId, [Message])
 receiveMessages h nextUpdateId = do
   result <-
@@ -67,6 +80,50 @@ receiveMessages h nextUpdateId = do
       (A.object ["offset" .= nextUpdateId, "timeout" .= (25 :: Int)])
       parseUpdatesResponse
   pure $ first (fromMaybe nextUpdateId) result
+
+sendMessage :: Handle -> ChatId -> Text -> IO ()
+sendMessage h chatId text = do
+  getResponseWithMethod_
+    h
+    (ApiMethod "sendMessage")
+    (A.object ["chat_id" .= chatId, "text" .= text])
+
+parseUpdatesResponse :: A.Value -> A.Parser (Maybe UpdateId, [Message])
+parseUpdatesResponse =
+  A.withObject "response" $ \r -> do
+    updates <- r .: "result"
+    (listToMaybe . reverse *** catMaybes) . unzip <$>
+      traverse parseUpdate updates
+  where
+    parseUpdate =
+      A.withObject "update" $ \update ->
+        liftA2 (,) (update .: "update_id") (optional $ update .: "message")
+
+data Message =
+  Message
+    { messageText :: Text
+    , messageChatId :: ChatId
+    }
+
+instance A.FromJSON Message where
+  parseJSON =
+    A.withObject "Message" $ \m -> do
+      text <- m .: "text"
+      chat <- m .: "chat"
+      chatId <- chat .: "id"
+      pure Message {messageText = text, messageChatId = chatId}
+
+newtype ChatId =
+  ChatId Int
+  deriving (A.FromJSON, A.ToJSON)
+
+newtype UpdateId =
+  UpdateId Int
+  deriving (A.FromJSON, A.ToJSON, Enum, Show)
+
+newtype ApiMethod =
+  ApiMethod String
+  deriving (Show)
 
 getResponseWithMethod ::
      (A.ToJSON request, A.FromJSON response)
@@ -106,63 +163,6 @@ getResponseWithMethod_ ::
      (A.ToJSON request) => Handle -> ApiMethod -> request -> IO ()
 getResponseWithMethod_ h method request =
   getResponseWithMethod h method request (const $ pure ())
-
-sendMessageToBotAndHandleOutput :: Handle -> Message -> IO ()
-sendMessageToBotAndHandleOutput h message = do
-  response <-
-    EchoBot.respond (hBotHandle h) . EchoBot.ReplyRequest . messageText $
-    message
-  case response of
-    EchoBot.RepliesResponse texts -> mapM_ (sendMessage h chatId) texts
-    EchoBot.MenuResponse _ _ ->
-      sendMessage h chatId "This command has not implemented already"
-    EchoBot.EmptyResponse -> pure ()
-  where
-    chatId = messageChatId message
-
-sendMessage :: Handle -> ChatId -> Text -> IO ()
-sendMessage h chatId text = do
-  getResponseWithMethod_
-    h
-    (ApiMethod "sendMessage")
-    (A.object ["chat_id" .= chatId, "text" .= text])
-
-newtype UpdateId =
-  UpdateId Int
-  deriving (A.FromJSON, A.ToJSON, Enum, Show)
-
-parseUpdatesResponse :: A.Value -> A.Parser (Maybe UpdateId, [Message])
-parseUpdatesResponse =
-  A.withObject "response" $ \r -> do
-    updates <- r .: "result"
-    (listToMaybe . reverse *** catMaybes) . unzip <$>
-      traverse parseUpdate updates
-  where
-    parseUpdate =
-      A.withObject "update" $ \update ->
-        liftA2 (,) (update .: "update_id") (optional $ update .: "message")
-
-data Message =
-  Message
-    { messageText :: Text
-    , messageChatId :: ChatId
-    }
-
-instance A.FromJSON Message where
-  parseJSON =
-    A.withObject "Message" $ \m -> do
-      text <- m .: "text"
-      chat <- m .: "chat"
-      chatId <- chat .: "id"
-      pure Message {messageText = text, messageChatId = chatId}
-
-newtype ChatId =
-  ChatId Int
-  deriving (A.FromJSON, A.ToJSON)
-
-newtype ApiMethod =
-  ApiMethod String
-  deriving (Show)
 
 endpointURI :: Handle -> ApiMethod -> URI.URI
 endpointURI h (ApiMethod method) =
