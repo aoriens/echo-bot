@@ -18,7 +18,6 @@ import Data.IORef
 import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import qualified EchoBot
 import qualified Logger
 import Logger ((.<))
@@ -55,81 +54,118 @@ run h = do
   nextUpdateIdRef <- newIORef $ UpdateId 0
   forever $ do
     nextUpdateId <- readIORef nextUpdateIdRef
-    (lastId, inputs) <- receiveMessages h nextUpdateId
-    forM_ inputs $ sendRequestToBotAndHandleOutput h . EchoBot.ReplyRequest
+    (lastId, inMessages) <- receiveMessages h nextUpdateId
+    forM_ inMessages $ sendMessageToBotAndHandleOutput h
     writeIORef nextUpdateIdRef $ succ lastId
 
-receiveMessages :: Handle -> UpdateId -> IO (UpdateId, [Text])
+receiveMessages :: Handle -> UpdateId -> IO (UpdateId, [Message])
 receiveMessages h nextUpdateId = do
-  Logger.debug h $ "getUpdates: " .< requestBody
+  result <-
+    getResponseWithMethod
+      h
+      (ApiMethod "getUpdates")
+      (A.object ["offset" .= nextUpdateId, "timeout" .= (25 :: Int)])
+      parseUpdatesResponse
+  pure $ first (fromMaybe nextUpdateId) result
+
+getResponseWithMethod ::
+     (A.ToJSON request, A.FromJSON response)
+  => Handle
+  -> ApiMethod
+  -> request
+  -> (A.Value -> A.Parser response)
+  -> IO response
+getResponseWithMethod h method request parser = do
+  Logger.debug h $ "Send " .< method <> ": " .< A.encode request
   response <- getResponse
   Logger.debug h $ "Responded with " .< Client.responseBody response
-  let result = decodeResponse response
+  result <- getResult response
   logResult result
-  pure $
-    either (const (nextUpdateId, [])) (first $ fromMaybe nextUpdateId) result
+  pure $ either error id result
   where
     getResponse = do
-      request <- getRequest
-      Client.httpLbs request $ hHttpManager h
+      httpRequest <- getRequest
+      Client.httpLbs httpRequest $ hHttpManager h
     getRequest = do
-      request <- Client.requestFromURI $ endpointURI h "getUpdates"
+      httpRequest <- Client.requestFromURI $ endpointURI h method
       pure
-        request
+        httpRequest
           { Client.checkResponse = Client.throwErrorStatusCodes
           , Client.method = "POST"
           , Client.requestHeaders = [("Content-Type", "application/json")]
-          , Client.requestBody = Client.RequestBodyLBS requestBody
+          , Client.requestBody = Client.RequestBodyLBS $ A.encode request
           }
-    requestBody =
-      A.encode $ A.object ["offset" .= nextUpdateId, "timeout" .= (25 :: Int)]
-    decodeResponse response = do
-      value <- A.eitherDecode $ Client.responseBody response
-      A.parseEither parseUpdatesResponse value
+    getResult response =
+      pure $ do
+        value <- A.eitherDecode (Client.responseBody response)
+        A.parseEither parser value
     logResult (Left e) = Logger.error h $ "Response error: " <> T.pack e
-    logResult (Right (maybeId, messages)) = do
-      Logger.info h $ "Received " .< length messages <> " messages"
-      Logger.debug h $ "Received last update_id=" .< maybeId
+    logResult _ = pure ()
 
-sendRequestToBotAndHandleOutput :: Handle -> EchoBot.Request -> IO ()
-sendRequestToBotAndHandleOutput h request = do
-  response <- EchoBot.respond (hBotHandle h) request
+getResponseWithMethod_ ::
+     (A.ToJSON request) => Handle -> ApiMethod -> request -> IO ()
+getResponseWithMethod_ h method request =
+  getResponseWithMethod h method request (const $ pure ())
+
+sendMessageToBotAndHandleOutput :: Handle -> Message -> IO ()
+sendMessageToBotAndHandleOutput h message = do
+  response <-
+    EchoBot.respond (hBotHandle h) . EchoBot.ReplyRequest . messageText $
+    message
   case response of
-    EchoBot.RepliesResponse texts -> sendMessages texts
-    EchoBot.MenuResponse title opts -> sendMenu h title opts
+    EchoBot.RepliesResponse texts -> mapM_ (sendMessage h chatId) texts
+    EchoBot.MenuResponse _ _ ->
+      sendMessage h chatId "This command has not implemented already"
     EchoBot.EmptyResponse -> pure ()
+  where
+    chatId = messageChatId message
 
-sendMessages :: [Text] -> IO ()
-sendMessages
-  -- Temporarily output them to stdout
- = mapM_ (T.putStrLn . (">> " <>))
-
-sendMenu :: Handle -> Text -> [(Int, EchoBot.Request)] -> IO ()
-sendMenu _ _ _ = undefined
+sendMessage :: Handle -> ChatId -> Text -> IO ()
+sendMessage h chatId text = do
+  getResponseWithMethod_
+    h
+    (ApiMethod "sendMessage")
+    (A.object ["chat_id" .= chatId, "text" .= text])
 
 newtype UpdateId =
   UpdateId Int
   deriving (A.FromJSON, A.ToJSON, Enum, Show)
 
-parseUpdatesResponse :: A.Value -> A.Parser (Maybe UpdateId, [Text])
+parseUpdatesResponse :: A.Value -> A.Parser (Maybe UpdateId, [Message])
 parseUpdatesResponse =
   A.withObject "response" $ \r -> do
     updates <- r .: "result"
-    retainLastIdOnly . catMaybes <$> traverse parseMessage updates
+    (listToMaybe . reverse *** catMaybes) . unzip <$>
+      traverse parseUpdate updates
   where
-    parseMessage :: A.Value -> A.Parser (Maybe (UpdateId, Text))
-    parseMessage =
-      A.withObject "update" $ \update -> do
-        updateId <- update .: "update_id"
-        optional $ do
-          message <- update .: "message"
-          text <- message .: "text"
-          pure (updateId, text)
-    retainLastIdOnly :: [(UpdateId, Text)] -> (Maybe UpdateId, [Text])
-    retainLastIdOnly = first (listToMaybe . reverse) . unzip
+    parseUpdate =
+      A.withObject "update" $ \update ->
+        liftA2 (,) (update .: "update_id") (optional $ update .: "message")
 
-endpointURI :: Handle -> String -> URI.URI
-endpointURI h method =
+data Message =
+  Message
+    { messageText :: Text
+    , messageChatId :: ChatId
+    }
+
+instance A.FromJSON Message where
+  parseJSON =
+    A.withObject "Message" $ \m -> do
+      text <- m .: "text"
+      chat <- m .: "chat"
+      chatId <- chat .: "id"
+      pure Message {messageText = text, messageChatId = chatId}
+
+newtype ChatId =
+  ChatId Int
+  deriving (A.FromJSON, A.ToJSON)
+
+newtype ApiMethod =
+  ApiMethod String
+  deriving (Show)
+
+endpointURI :: Handle -> ApiMethod -> URI.URI
+endpointURI h (ApiMethod method) =
   fromMaybe (error $ "Bad URI: " ++ uri) . URI.parseURI $ uri
   where
     uri = "https://api.telegram.org/bot" ++ apiToken ++ "/" ++ method
