@@ -2,13 +2,14 @@
   MultiParamTypeClasses #-}
 
 module FrontEnd.Telegram
-  ( run
-  , Handle(..)
+  ( new
+  , run
+  , Handle
   , Config(..)
   ) where
 
-import Control.Arrow
 import Control.Applicative
+import Control.Arrow
 import Control.Monad
 import qualified Data.Aeson as A
 import Data.Aeson ((.:), (.=))
@@ -35,23 +36,33 @@ data Handle =
     { hBotHandle :: EchoBot.Handle IO
     , hLogHandle :: Logger.Handle IO
     , hConfig :: Config
+    , hHttpManager :: Client.Manager
     }
+
+new :: EchoBot.Handle IO -> Logger.Handle IO -> Config -> IO Handle
+new botHandle logHandle config = do
+  httpManager <- Client.newManager TLS.tlsManagerSettings
+  pure
+    Handle
+      { hBotHandle = botHandle
+      , hLogHandle = logHandle
+      , hConfig = config
+      , hHttpManager = httpManager
+      }
 
 run :: Handle -> IO ()
 run h = do
-  httpManager <- Client.newManager TLS.tlsManagerSettings
   nextUpdateIdRef <- newIORef $ UpdateId 0
   forever $ do
     nextUpdateId <- readIORef nextUpdateIdRef
-    (lastId, inputs) <- receiveMessages h httpManager nextUpdateId
+    (lastId, inputs) <- receiveMessages h nextUpdateId
     forM_ inputs $ sendRequestToBotAndHandleOutput h . EchoBot.ReplyRequest
     case lastId of
       Nothing -> pure ()
       Just ident -> writeIORef nextUpdateIdRef $ succ ident
 
-receiveMessages ::
-     Handle -> Client.Manager -> UpdateId -> IO (Maybe UpdateId, [Text])
-receiveMessages h httpManager nextUpdateId = do
+receiveMessages :: Handle -> UpdateId -> IO (Maybe UpdateId, [Text])
+receiveMessages h nextUpdateId = do
   Logger.debug h $ "getUpdates: " .< requestBody
   response <- getResponse
   Logger.debug h $ "Responded with " .< Client.responseBody response
@@ -61,7 +72,7 @@ receiveMessages h httpManager nextUpdateId = do
   where
     getResponse = do
       request <- getRequest
-      Client.httpLbs request httpManager
+      Client.httpLbs request $ hHttpManager h
     getRequest = do
       request <- Client.requestFromURI $ endpointURI h "getUpdates"
       pure

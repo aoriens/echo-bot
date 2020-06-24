@@ -29,12 +29,8 @@ runConsoleFrontEnd botHandle =
 runTelegramFrontEnd :: Logger.Handle IO -> EchoBot.Handle IO -> IO ()
 runTelegramFrontEnd logHandle botHandle = do
   config <- Config.getTelegramConfig
-  FrontEnd.Telegram.run
-    FrontEnd.Telegram.Handle
-      { FrontEnd.Telegram.hBotHandle = botHandle
-      , FrontEnd.Telegram.hLogHandle = logHandle
-      , FrontEnd.Telegram.hConfig = config
-      }
+  handle <- FrontEnd.Telegram.new botHandle logHandle config
+  FrontEnd.Telegram.run handle
 
 getLogHandle :: IO (Logger.Handle IO)
 getLogHandle = Logger.Impl.new <$> Config.getLoggerConfig
