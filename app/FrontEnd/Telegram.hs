@@ -57,18 +57,17 @@ run h = do
     nextUpdateId <- readIORef nextUpdateIdRef
     (lastId, inputs) <- receiveMessages h nextUpdateId
     forM_ inputs $ sendRequestToBotAndHandleOutput h . EchoBot.ReplyRequest
-    case lastId of
-      Nothing -> pure ()
-      Just ident -> writeIORef nextUpdateIdRef $ succ ident
+    writeIORef nextUpdateIdRef $ succ lastId
 
-receiveMessages :: Handle -> UpdateId -> IO (Maybe UpdateId, [Text])
+receiveMessages :: Handle -> UpdateId -> IO (UpdateId, [Text])
 receiveMessages h nextUpdateId = do
   Logger.debug h $ "getUpdates: " .< requestBody
   response <- getResponse
   Logger.debug h $ "Responded with " .< Client.responseBody response
   let result = decodeResponse response
   logResult result
-  pure $ either (const (Nothing, [])) id result
+  pure $
+    either (const (nextUpdateId, [])) (first $ fromMaybe nextUpdateId) result
   where
     getResponse = do
       request <- getRequest
