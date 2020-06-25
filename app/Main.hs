@@ -12,14 +12,16 @@ import qualified FrontEnd.Console
 import qualified FrontEnd.Telegram
 import qualified Logger
 import qualified Logger.Impl
+import Main.ConfigurationTypes
 
 main :: IO ()
 main = do
   logHandle <- getLogHandle
   botHandle <- getBotHandle logHandle
-  if shouldUseTelegramFrontEnd
-    then runTelegramFrontEnd logHandle botHandle
-    else runConsoleFrontEnd botHandle
+  frontEnd <- Config.getFrontEndConfig
+  case frontEnd of
+    TelegramFrontEnd -> runTelegramFrontEnd logHandle botHandle
+    ConsoleFrontEnd -> runConsoleFrontEnd botHandle
 
 runConsoleFrontEnd :: EchoBot.Handle IO -> IO ()
 runConsoleFrontEnd botHandle =
@@ -47,6 +49,3 @@ getBotHandle logHandle = do
       , EchoBot.hLogHandle = logHandle
       , EchoBot.hConfig = botConfig
       }
-
-shouldUseTelegramFrontEnd :: Bool
-shouldUseTelegramFrontEnd = True

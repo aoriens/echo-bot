@@ -1,10 +1,11 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, FlexibleInstances #-}
 
 -- | A module to provide a configuration reader for other modules.
 module Config
   ( getBotConfig
   , getLoggerConfig
   , getTelegramConfig
+  , getFrontEndConfig
   ) where
 
 import Control.Monad.Reader
@@ -15,6 +16,7 @@ import qualified EchoBot
 import qualified FrontEnd.Telegram
 import qualified Logger
 import qualified Logger.Impl
+import qualified Main.ConfigurationTypes as Main
 import System.Environment
 import System.IO
 import System.IO.Error
@@ -37,8 +39,7 @@ getBotConfig =
 getLoggerConfig :: IO Logger.Impl.Handle
 getLoggerConfig =
   withConfigFileSection "log" $ do
-    (LogLevelWrapper level) <-
-      lookupDefault "Verbosity" $ LogLevelWrapper Logger.Info
+    level <- unwrap <$> lookupDefault "Verbosity" (Wrapper Logger.Info)
     path <- lookupDefault "Path" ""
     fileHandle <- lift $ openLogFile path
     pure
@@ -57,6 +58,11 @@ getTelegramConfig =
         , FrontEnd.Telegram.confPollTimeout = pollTimeout
         , FrontEnd.Telegram.confConnectionTimeout = connectionTimeout
         }
+
+getFrontEndConfig :: IO Main.FrontEnd
+getFrontEndConfig =
+  withConfigFileSection "core" $
+  unwrap <$> lookupDefault "FrontEnd" (Wrapper Main.ConsoleFrontEnd)
 
 openLogFile :: FilePath -> IO Handle
 openLogFile "" = pure stderr
@@ -94,12 +100,19 @@ require key =
     (error $ "'" ++ T.unpack key ++ "' must be specified in configuration")
 
 -- | A wrapper type to avoid orphan instance warning
-newtype LogLevelWrapper =
-  LogLevelWrapper Logger.Level
+newtype Wrapper a =
+  Wrapper
+    { unwrap :: a
+    }
 
-instance C.Configured LogLevelWrapper where
-  convert (C.String "debug") = Just $ LogLevelWrapper Logger.Debug
-  convert (C.String "info") = Just $ LogLevelWrapper Logger.Info
-  convert (C.String "warning") = Just $ LogLevelWrapper Logger.Warning
-  convert (C.String "error") = Just $ LogLevelWrapper Logger.Error
+instance C.Configured (Wrapper Logger.Level) where
+  convert (C.String "debug") = Just $ Wrapper Logger.Debug
+  convert (C.String "info") = Just $ Wrapper Logger.Info
+  convert (C.String "warning") = Just $ Wrapper Logger.Warning
+  convert (C.String "error") = Just $ Wrapper Logger.Error
+  convert _ = Nothing
+
+instance C.Configured (Wrapper Main.FrontEnd) where
+  convert (C.String "console") = Just $ Wrapper Main.ConsoleFrontEnd
+  convert (C.String "telegram") = Just $ Wrapper Main.TelegramFrontEnd
   convert _ = Nothing

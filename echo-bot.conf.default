@@ -11,6 +11,15 @@ core {
   # via menu. It must not be negative, otherwise the program will
   # fail.
   EchoRepetitionCount = 2
+
+  # A front-end to run. Available values are:
+  #
+  # - "console": a simple, single user, terminal front-end using stdin
+  #   and stdout. No networking is needed. This is a default.
+  #
+  # - "telegram": Telegram messenger front-end. The bot operates as a
+  #   Telegram bot.
+  FrontEnd = "console"
 }
 
 log {
