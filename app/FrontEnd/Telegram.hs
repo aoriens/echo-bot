@@ -91,12 +91,12 @@ handleEvent h (MessageEvent message) =
     (EchoBot.MessageEvent $ messageText message)
 handleEvent h (MenuChoiceEvent callbackQuery) =
   void . runMaybeT $ do
+    lift . sendAnswerCallbackQueryRequest h $ cqId callbackQuery
     menu <- findOpenMenuOrExit
     when (cqMessageId callbackQuery /= omMessageId menu) $
       exitWithBadMessageId menu
     botRequest <- findBotRequestMatchingChoiceOrExit menu
     lift $ do
-      sendAnswerCallbackQueryRequest h $ cqId callbackQuery
       closeMenu h $ cqChatId callbackQuery
       sendRequestToBotAndHandleOutput h chatId botRequest
   where
