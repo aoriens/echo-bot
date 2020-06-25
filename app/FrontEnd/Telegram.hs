@@ -25,7 +25,7 @@ import qualified Data.Text as T
 import qualified EchoBot
 import qualified Logger
 import Logger ((.<))
-import qualified Network.HTTP.Client as Client
+import qualified Network.HTTP.Client as HTTP
 import qualified Network.HTTP.Client.TLS as TLS
 import qualified Network.URI as URI
 
@@ -49,7 +49,7 @@ data Handle =
     { hBotHandle :: EchoBot.Handle IO
     , hLogHandle :: Logger.Handle IO
     , hConfig :: Config
-    , hHttpManager :: Client.Manager
+    , hHttpManager :: HTTP.Manager
     -- | Open menus keyed by ChatId. Each chat can have a dedicated
     -- open menu.
     , hOpenMenus :: IORef (IntMap OpenMenu)
@@ -65,7 +65,7 @@ data OpenMenu =
 
 new :: EchoBot.Handle IO -> Logger.Handle IO -> Config -> IO Handle
 new botHandle logHandle config = do
-  httpManager <- Client.newManager TLS.tlsManagerSettings
+  httpManager <- HTTP.newManager TLS.tlsManagerSettings
   menus <- newIORef mempty
   pure
     Handle
@@ -91,12 +91,12 @@ receiveEvents h nextUpdateId = do
     h
     (ApiMethod "getUpdates")
     (A.object ["offset" .= nextUpdateId, "timeout" .= pollTimeout])
-    (\httpRequest -> httpRequest {Client.responseTimeout = httpTimeout})
+    (\httpRequest -> httpRequest {HTTP.responseTimeout = httpTimeout})
     parseUpdatesResponse
   where
     pollTimeout = confPollTimeout $ hConfig h
     connectionTimeout = pollTimeout + confConnectionTimeout (hConfig h)
-    httpTimeout = Client.responseTimeoutMicro $ 1000000 * connectionTimeout
+    httpTimeout = HTTP.responseTimeoutMicro $ 1000000 * connectionTimeout
 
 handleEvent :: Handle -> Event -> IO ()
 handleEvent h (MessageEvent message) =
@@ -244,36 +244,36 @@ getResponseWithMethodAndRequestModifier ::
   => Handle
   -> ApiMethod
   -> request
-  -> (Client.Request -> Client.Request)
+  -> (HTTP.Request -> HTTP.Request)
   -> (A.Value -> A.Parser response)
   -> IO response
 getResponseWithMethodAndRequestModifier h method request httpRequestModifier parser = do
   Logger.debug h $ "Send " .< method <> ": " .< A.encode request
   response <- getResponse
-  Logger.debug h $ "Responded with " .< Client.responseBody response
+  Logger.debug h $ "Responded with " .< HTTP.responseBody response
   result <- getResult response
   logResult result
   pure $ either error id result
   where
     getResponse = do
       httpRequest <- getRequest
-      Client.httpLbs httpRequest $ hHttpManager h
+      HTTP.httpLbs httpRequest $ hHttpManager h
     getRequest = do
-      httpRequest <- Client.requestFromURI $ endpointURI h method
+      httpRequest <- HTTP.requestFromURI $ endpointURI h method
       pure . httpRequestModifier $
         httpRequest
-          { Client.checkResponse = Client.throwErrorStatusCodes
-          , Client.method = "POST"
-          , Client.requestHeaders = [("Content-Type", "application/json")]
-          , Client.requestBody = Client.RequestBodyLBS $ A.encode request
-          , Client.responseTimeout = defaultHttpTimeout
+          { HTTP.checkResponse = HTTP.throwErrorStatusCodes
+          , HTTP.method = "POST"
+          , HTTP.requestHeaders = [("Content-Type", "application/json")]
+          , HTTP.requestBody = HTTP.RequestBodyLBS $ A.encode request
+          , HTTP.responseTimeout = defaultHttpTimeout
           }
     defaultHttpTimeout =
-      Client.responseTimeoutMicro . (1000000 *) . confConnectionTimeout $
+      HTTP.responseTimeoutMicro . (1000000 *) . confConnectionTimeout $
       hConfig h
     getResult response =
       pure $ do
-        value <- A.eitherDecode (Client.responseBody response)
+        value <- A.eitherDecode (HTTP.responseBody response)
         A.parseEither parser value
     logResult (Left e) = Logger.error h $ "Response error: " <> T.pack e
     logResult _ = pure ()
