@@ -97,7 +97,10 @@ handleEvent h (MenuChoiceEvent callbackQuery) =
       exitWithBadMessageId menu
     botRequest <- findBotRequestMatchingChoiceOrExit menu
     lift $ do
-      closeMenu h $ cqChatId callbackQuery
+      closeMenuWithReplacementText
+        h
+        (cqChatId callbackQuery)
+        "You have already made your choice"
       sendRequestToBotAndHandleOutput h chatId botRequest
   where
     findOpenMenuOrExit = do
@@ -134,7 +137,7 @@ sendRequestToBotAndHandleOutput h chatId request = do
 -- menus are implemented.
 openMenu :: Handle -> ChatId -> Text -> [(Int, EchoBot.Event)] -> IO ()
 openMenu h chatId title opts = do
-  closeMenu h chatId
+  closeMenuWithReplacementText h chatId "The menu is now out-of-date"
   Logger.info h "Sending a message with menu"
   messageId <-
     sendMessageWithInlineKeyboard h chatId title [zip callbackDataList labels]
@@ -152,19 +155,24 @@ openMenu h chatId title opts = do
 
 -- | Safely deletes menu both from the chat and from the pending menu
 -- table.
-closeMenu :: Handle -> ChatId -> IO ()
-closeMenu h chatId = do
+closeMenuWithReplacementText :: Handle -> ChatId -> Text -> IO ()
+closeMenuWithReplacementText h chatId replacementText = do
   menus <- readIORef $ hOpenMenus h
   let (maybeMenu, menus') =
         IntMap.updateLookupWithKey (\_ _ -> Nothing) menuKey menus
   whenJust maybeMenu $ \menu -> do
-    Logger.info h "Closing menu"
+    Logger.info h $ "Closing menu with replacement text: " <> replacementText
     writeIORef (hOpenMenus h) menus'
     deleteMenuFromChat menu
   where
     menuKey = unChatId chatId
     deleteMenuFromChat menu =
-      sendEditMessageTextRequest h chatId (omMessageId menu) (omTitle menu)
+      sendEditMessageTextRequest
+        h
+        chatId
+        (omMessageId menu)
+        (makeEditedTitle menu)
+    makeEditedTitle menu = omTitle menu <> "\n(" <> replacementText <> ")"
 
 sendMessage :: Handle -> ChatId -> Text -> IO ()
 sendMessage h chatId text = do
