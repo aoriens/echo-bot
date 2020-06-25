@@ -27,7 +27,7 @@ spec =
         let config = stubConfig
         let h = handleWith config
         response <-
-          run $ runBotWithConfig config $ respond h (ReplyRequest comment)
+          run $ runBotWithConfig config $ respond h (MessageEvent comment)
         assert $ response == RepliesResponse [comment]
     prop
       "should echo a simple message for any specified \
@@ -37,12 +37,12 @@ spec =
         let config = stubConfig {confRepetitionCount = count}
         let h = handleWith config
         response <-
-          run $ runBotWithConfig config $ respond h (ReplyRequest comment)
+          run $ runBotWithConfig config $ respond h (MessageEvent comment)
         assert $ response == RepliesResponse (replicate count comment)
     it "should output menu for /repeat command" $ do
       let config = stubConfig
       let h = handleWith config
-      response <- runBotWithConfig config $ respond h (ReplyRequest "/repeat")
+      response <- runBotWithConfig config $ respond h (MessageEvent "/repeat")
       response `shouldSatisfy` isMenuResponse
     it "should honor the repetition count set by the user" $ do
       let comment = "comment"
@@ -51,22 +51,22 @@ spec =
       let h = handleWith config
       response <-
         runBotWithConfig config $ do
-          (MenuResponse _ opts) <- respond h $ ReplyRequest "/repeat"
+          (MenuResponse _ opts) <- respond h $ MessageEvent "/repeat"
           Just request <- pure $ lookup newRepCount opts
           void $ respond h request
-          respond h $ ReplyRequest comment
+          respond h $ MessageEvent comment
       response `shouldBe` RepliesResponse (replicate newRepCount comment)
     it "should output the help text for /help command" $ do
       let helpText = "My help text"
       let config = stubConfig {confHelpReply = helpText}
       let h = handleWith config
-      response <- runBotWithConfig config $ respond h $ ReplyRequest "/help"
+      response <- runBotWithConfig config $ respond h $ MessageEvent "/help"
       response `shouldBe` RepliesResponse [helpText]
     it "should output the predefined menu title for /repeat command" $ do
       let title = "My title"
       let config = stubConfig {confRepeatReply = title}
       let h = handleWith config
-      response <- runBotWithConfig config $ respond h $ ReplyRequest "/repeat"
+      response <- runBotWithConfig config $ respond h $ MessageEvent "/repeat"
       response `shouldSatisfy` isMenuResponseWithTitle title
     it "should substitute {count} with repetition count in the menu title" $ do
       let config =
@@ -75,7 +75,7 @@ spec =
               , confRepetitionCount = 3
               }
       let h = handleWith config
-      response <- runBotWithConfig config $ respond h $ ReplyRequest "/repeat"
+      response <- runBotWithConfig config $ respond h $ MessageEvent "/repeat"
       response `shouldSatisfy` isMenuResponseWithTitle "My count is 3, {right}."
     it "should parse a command with trailing and leading spaces" $ do
       shouldRecognizeHelpCommand "/help "
@@ -108,7 +108,7 @@ shouldRecognizeHelpCommandOrNot matchOrNot input = do
   let helpText = "Help text, not " <> input
   let config = stubConfig {confHelpReply = helpText}
   let h = handleWith config
-  response <- runBotWithConfig config $ respond h $ ReplyRequest input
+  response <- runBotWithConfig config $ respond h $ MessageEvent input
   let expected = RepliesResponse [helpText]
   if matchOrNot
     then response `shouldBe` expected

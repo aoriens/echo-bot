@@ -4,7 +4,7 @@
 module EchoBot
   ( makeState
   , respond
-  , Request(ReplyRequest)
+  , Event(MessageEvent)
   , Response(..)
   , State
   , Handle(..)
@@ -42,13 +42,13 @@ data Config =
     }
 
 -- | An action taken by the user that the bot should respond.
-data Request
+data Event
   -- | A text comment
-  = ReplyRequest Text
+  = MessageEvent Text
   -- | Set the repetition count. The constructor is not considered to
   -- be exported, so that clients could not use it to create requests,
   -- but values based on it could be returned from the module.
-  | SetRepetitionCountRequest Int
+  | SetRepetitionCountEvent Int
   deriving (Eq, Show)
 
 -- | Bot reaction to a request.
@@ -59,7 +59,7 @@ data Response
   -- | A command to output a menu with the given title and options.
   -- Each option is paired with the corresponding request to perform
   -- on selection.
-  | MenuResponse Text [(Int, Request)]
+  | MenuResponse Text [(Int, Event)]
   | EmptyResponse
   deriving (Eq, Show)
 
@@ -82,10 +82,10 @@ checkConfig conf =
     else Right ()
 
 -- | Evaluates a response for the passed request.
-respond :: (Monad m) => Handle m -> Request -> m Response
-respond h (SetRepetitionCountRequest repetitionCount) =
+respond :: (Monad m) => Handle m -> Event -> m Response
+respond h (SetRepetitionCountEvent repetitionCount) =
   handleSettingRepetitionCount h repetitionCount
-respond h (ReplyRequest text)
+respond h (MessageEvent text)
   | isCommand "/help" = handleHelpCommand h
   | isCommand "/repeat" = handleRepeatCommand h
   | otherwise = respondWithEchoedComment h text
@@ -115,7 +115,7 @@ handleRepeatCommand h = do
   where
     choices =
       map
-        (id &&& SetRepetitionCountRequest)
+        (id &&& SetRepetitionCountEvent)
         [minRepetitionCount .. maxRepetitionCount]
 
 repeatCommandReply :: (Monad m) => Handle m -> m Text

@@ -26,9 +26,9 @@ run h = do
   TIO.putStrLn "Welcome to the echo-bot"
   forever $ do
     input <- getLineWithPrompt "> "
-    sendRequestToBotAndHandleOutput h . EchoBot.ReplyRequest $ input
+    sendRequestToBotAndHandleOutput h . EchoBot.MessageEvent $ input
 
-sendRequestToBotAndHandleOutput :: Handle -> EchoBot.Request -> IO ()
+sendRequestToBotAndHandleOutput :: Handle -> EchoBot.Event -> IO ()
 sendRequestToBotAndHandleOutput h request = do
   response <- EchoBot.respond (hBotHandle h) request
   case response of
@@ -42,7 +42,7 @@ getLineWithPrompt prompt = do
   hFlush stdout
   TIO.getLine
 
-handleMenuResponse :: Handle -> Text -> [(Int, EchoBot.Request)] -> IO ()
+handleMenuResponse :: Handle -> Text -> [(Int, EchoBot.Event)] -> IO ()
 handleMenuResponse h title opts = do
   let textOpts = map (first $ T.pack . show) opts
   TIO.putStrLn . renderMenu title . map fst $ textOpts

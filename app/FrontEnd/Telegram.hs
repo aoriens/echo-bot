@@ -50,7 +50,7 @@ data OpenMenu =
   OpenMenu
     { omMessageId :: MessageId
     , omTitle :: Text
-    , omChoiceMap :: [(CallbackData, EchoBot.Request)]
+    , omChoiceMap :: [(CallbackData, EchoBot.Event)]
     }
 
 new :: EchoBot.Handle IO -> Logger.Handle IO -> Config -> IO Handle
@@ -88,7 +88,7 @@ handleEvent h (MessageEvent message) =
   sendRequestToBotAndHandleOutput
     h
     (messageChatId message)
-    (EchoBot.ReplyRequest $ messageText message)
+    (EchoBot.MessageEvent $ messageText message)
 handleEvent h (MenuChoiceEvent callbackQuery) =
   void . runMaybeT $ do
     menu <- findOpenMenuOrExit
@@ -122,7 +122,7 @@ handleEvent h (MenuChoiceEvent callbackQuery) =
     menuKey = unChatId chatId
     chatId = cqChatId callbackQuery
 
-sendRequestToBotAndHandleOutput :: Handle -> ChatId -> EchoBot.Request -> IO ()
+sendRequestToBotAndHandleOutput :: Handle -> ChatId -> EchoBot.Event -> IO ()
 sendRequestToBotAndHandleOutput h chatId request = do
   response <- EchoBot.respond (hBotHandle h) request
   case response of
@@ -132,7 +132,7 @@ sendRequestToBotAndHandleOutput h chatId request = do
 
 -- | Sends a menu with repetition count options. Currently no other
 -- menus are implemented.
-openMenu :: Handle -> ChatId -> Text -> [(Int, EchoBot.Request)] -> IO ()
+openMenu :: Handle -> ChatId -> Text -> [(Int, EchoBot.Event)] -> IO ()
 openMenu h chatId title opts = do
   closeMenu h chatId
   messageId <-
