@@ -73,9 +73,7 @@ run h = do
     nextUpdateId <- readIORef nextUpdateIdRef
     (lastId, events) <- receiveEvents h nextUpdateId
     forM_ events $ handleEvent h
-    case lastId of
-      Nothing -> pure ()
-      Just ident -> writeIORef nextUpdateIdRef $ succ ident
+    whenJust lastId $ writeIORef nextUpdateIdRef . succ
 
 receiveEvents :: Handle -> UpdateId -> IO (Maybe UpdateId, [Event])
 receiveEvents h nextUpdateId = do
@@ -158,12 +156,9 @@ closeMenu h chatId = do
   menus <- readIORef $ hOpenMenus h
   let (maybeMenu, menus') =
         IntMap.updateLookupWithKey (\_ _ -> Nothing) menuKey menus
-  maybe
-    (pure ())
-    (\menu -> do
-       writeIORef (hOpenMenus h) menus'
-       deleteMenuFromChat menu)
-    maybeMenu
+  whenJust maybeMenu $ \menu -> do
+    writeIORef (hOpenMenus h) menus'
+    deleteMenuFromChat menu
   where
     menuKey = unChatId chatId
     deleteMenuFromChat menu =
@@ -343,3 +338,6 @@ newtype CallbackData =
 newtype ApiMethod =
   ApiMethod String
   deriving (Show)
+
+whenJust :: (Applicative m) => Maybe a -> (a -> m ()) -> m ()
+whenJust x f = maybe (pure ()) f x
