@@ -40,10 +40,12 @@ data Handle =
     , hLogHandle :: Logger.Handle IO
     , hConfig :: Config
     , hHttpManager :: Client.Manager
-    -- | Open menus keyed by ChatId
+    -- | Open menus keyed by ChatId. Each chat can have a dedicated
+    -- open menu.
     , hOpenMenus :: IORef (IntMap OpenMenu)
     }
 
+-- | Data to describe the currently open menu in a specific chat.
 data OpenMenu =
   OpenMenu
     { omMessageId :: MessageId
@@ -75,14 +77,6 @@ run h = do
       Nothing -> pure ()
       Just ident -> writeIORef nextUpdateIdRef $ succ ident
 
-sendRequestToBotAndHandleOutput :: Handle -> ChatId -> EchoBot.Request -> IO ()
-sendRequestToBotAndHandleOutput h chatId request = do
-  response <- EchoBot.respond (hBotHandle h) request
-  case response of
-    EchoBot.RepliesResponse texts -> mapM_ (sendMessage h chatId) texts
-    EchoBot.MenuResponse title opts -> openMenu h chatId title opts
-    EchoBot.EmptyResponse -> pure ()
-
 receiveEvents :: Handle -> UpdateId -> IO (Maybe UpdateId, [Event])
 receiveEvents h nextUpdateId = do
   getResponseWithMethod
@@ -111,8 +105,6 @@ handleEvent h (MenuChoiceEvent callbackQuery) =
     findOpenMenuOrExit = do
       menus <- lift . readIORef $ hOpenMenus h
       maybe exitWithNoOpenMenu pure $ IntMap.lookup menuKey menus
-    menuKey = unChatId chatId
-    chatId = cqChatId callbackQuery
     findBotRequestMatchingChoiceOrExit menu =
       maybe exitWithWrongButton pure . lookup (cqData callbackQuery) $
       omChoiceMap menu
@@ -129,6 +121,16 @@ handleEvent h (MenuChoiceEvent callbackQuery) =
     exitWithWrongButton = do
       lift . Logger.warn h $ "Invalid menu choice: " .< callbackQuery
       empty
+    menuKey = unChatId chatId
+    chatId = cqChatId callbackQuery
+
+sendRequestToBotAndHandleOutput :: Handle -> ChatId -> EchoBot.Request -> IO ()
+sendRequestToBotAndHandleOutput h chatId request = do
+  response <- EchoBot.respond (hBotHandle h) request
+  case response of
+    EchoBot.RepliesResponse texts -> mapM_ (sendMessage h chatId) texts
+    EchoBot.MenuResponse title opts -> openMenu h chatId title opts
+    EchoBot.EmptyResponse -> pure ()
 
 -- | Sends a menu with repetition count options. Currently no other
 -- menus are implemented.
@@ -207,6 +209,55 @@ sendEditMessageTextRequest h chatId messageId text =
     (ApiMethod "editMessageText")
     (A.object ["chat_id" .= chatId, "message_id" .= messageId, "text" .= text])
 
+getResponseWithMethod ::
+     (A.ToJSON request)
+  => Handle
+  -> ApiMethod
+  -> request
+  -> (A.Value -> A.Parser response)
+  -> IO response
+getResponseWithMethod h method request parser = do
+  Logger.debug h $ "Send " .< method <> ": " .< A.encode request
+  response <- getResponse
+  Logger.debug h $ "Responded with " .< Client.responseBody response
+  result <- getResult response
+  logResult result
+  pure $ either error id result
+  where
+    getResponse = do
+      httpRequest <- getRequest
+      Client.httpLbs httpRequest $ hHttpManager h
+    getRequest = do
+      httpRequest <- Client.requestFromURI $ endpointURI h method
+      pure
+        httpRequest
+          { Client.checkResponse = Client.throwErrorStatusCodes
+          , Client.method = "POST"
+          , Client.requestHeaders = [("Content-Type", "application/json")]
+          , Client.requestBody = Client.RequestBodyLBS $ A.encode request
+          }
+    getResult response =
+      pure $ do
+        value <- A.eitherDecode (Client.responseBody response)
+        A.parseEither parser value
+    logResult (Left e) = Logger.error h $ "Response error: " <> T.pack e
+    logResult _ = pure ()
+
+getResponseWithMethod_ ::
+     (A.ToJSON request) => Handle -> ApiMethod -> request -> IO ()
+getResponseWithMethod_ h method request =
+  getResponseWithMethod h method request (const $ pure ())
+
+endpointURI :: Handle -> ApiMethod -> URI.URI
+endpointURI h (ApiMethod method) =
+  fromMaybe (error $ "Bad URI: " ++ uri) . URI.parseURI $ uri
+  where
+    uri = "https://api.telegram.org/bot" ++ apiToken ++ "/" ++ method
+    apiToken = T.unpack . confApiToken . hConfig $ h
+
+instance Logger.Logger Handle IO where
+  lowLevelLog = Logger.lowLevelLog . hLogHandle
+
 parseEvents :: A.Value -> A.Parser (Maybe UpdateId, [Event])
 parseEvents =
   A.withObject "response" $ \r -> do
@@ -222,6 +273,7 @@ parseEvents =
       (MenuChoiceEvent <$> update .: "callback_query") <|>
       fail "unsupported kind of 'Update' object"
 
+-- | An event that can occur in the chat, caused by the user.
 data Event
   = MessageEvent Message
   | MenuChoiceEvent CallbackQuery
@@ -291,52 +343,3 @@ newtype CallbackData =
 newtype ApiMethod =
   ApiMethod String
   deriving (Show)
-
-getResponseWithMethod ::
-     (A.ToJSON request)
-  => Handle
-  -> ApiMethod
-  -> request
-  -> (A.Value -> A.Parser response)
-  -> IO response
-getResponseWithMethod h method request parser = do
-  Logger.debug h $ "Send " .< method <> ": " .< A.encode request
-  response <- getResponse
-  Logger.debug h $ "Responded with " .< Client.responseBody response
-  result <- getResult response
-  logResult result
-  pure $ either error id result
-  where
-    getResponse = do
-      httpRequest <- getRequest
-      Client.httpLbs httpRequest $ hHttpManager h
-    getRequest = do
-      httpRequest <- Client.requestFromURI $ endpointURI h method
-      pure
-        httpRequest
-          { Client.checkResponse = Client.throwErrorStatusCodes
-          , Client.method = "POST"
-          , Client.requestHeaders = [("Content-Type", "application/json")]
-          , Client.requestBody = Client.RequestBodyLBS $ A.encode request
-          }
-    getResult response =
-      pure $ do
-        value <- A.eitherDecode (Client.responseBody response)
-        A.parseEither parser value
-    logResult (Left e) = Logger.error h $ "Response error: " <> T.pack e
-    logResult _ = pure ()
-
-getResponseWithMethod_ ::
-     (A.ToJSON request) => Handle -> ApiMethod -> request -> IO ()
-getResponseWithMethod_ h method request =
-  getResponseWithMethod h method request (const $ pure ())
-
-endpointURI :: Handle -> ApiMethod -> URI.URI
-endpointURI h (ApiMethod method) =
-  fromMaybe (error $ "Bad URI: " ++ uri) . URI.parseURI $ uri
-  where
-    uri = "https://api.telegram.org/bot" ++ apiToken ++ "/" ++ method
-    apiToken = T.unpack . confApiToken . hConfig $ h
-
-instance Logger.Logger Handle IO where
-  lowLevelLog = Logger.lowLevelLog . hLogHandle
