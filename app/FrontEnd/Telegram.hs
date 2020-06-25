@@ -176,7 +176,7 @@ closeMenuWithReplacementText h chatId replacementText = do
 
 sendMessage :: Handle -> ChatId -> Text -> IO ()
 sendMessage h chatId text = do
-  getResponseWithMethod_
+  executeMethod
     h
     (ApiMethod "sendMessage")
     (A.object ["chat_id" .= chatId, "text" .= text])
@@ -202,14 +202,14 @@ sendMessageWithInlineKeyboard h chatId title opts =
 
 sendAnswerCallbackQueryRequest :: Handle -> CallbackQueryId -> IO ()
 sendAnswerCallbackQueryRequest h queryId =
-  getResponseWithMethod_
+  executeMethod
     h
     (ApiMethod "answerCallbackQuery")
     (A.object ["callback_query_id" .= queryId])
 
 sendEditMessageTextRequest :: Handle -> ChatId -> MessageId -> Text -> IO ()
 sendEditMessageTextRequest h chatId messageId text =
-  getResponseWithMethod_
+  executeMethod
     h
     (ApiMethod "editMessageText")
     (A.object ["chat_id" .= chatId, "message_id" .= messageId, "text" .= text])
@@ -248,9 +248,8 @@ getResponseWithMethod h method request parser = do
     logResult (Left e) = Logger.error h $ "Response error: " <> T.pack e
     logResult _ = pure ()
 
-getResponseWithMethod_ ::
-     (A.ToJSON request) => Handle -> ApiMethod -> request -> IO ()
-getResponseWithMethod_ h method request =
+executeMethod :: (A.ToJSON request) => Handle -> ApiMethod -> request -> IO ()
+executeMethod h method request =
   getResponseWithMethod h method request (const $ pure ())
 
 endpointURI :: Handle -> ApiMethod -> URI.URI
