@@ -135,6 +135,7 @@ sendRequestToBotAndHandleOutput h chatId request = do
 openMenu :: Handle -> ChatId -> Text -> [(Int, EchoBot.Event)] -> IO ()
 openMenu h chatId title opts = do
   closeMenu h chatId
+  Logger.info h "Sending a message with menu"
   messageId <-
     sendMessageWithInlineKeyboard h chatId title [zip callbackDataList labels]
   modifyIORef' (hOpenMenus h) $
@@ -157,6 +158,7 @@ closeMenu h chatId = do
   let (maybeMenu, menus') =
         IntMap.updateLookupWithKey (\_ _ -> Nothing) menuKey menus
   whenJust maybeMenu $ \menu -> do
+    Logger.info h "Closing menu"
     writeIORef (hOpenMenus h) menus'
     deleteMenuFromChat menu
   where
