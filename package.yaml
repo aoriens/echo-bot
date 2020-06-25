@@ -22,6 +22,7 @@ dependencies:
 - base >= 4.7 && < 5
 - text
 - mtl
+- transformers
 
 library:
   source-dirs: src
@@ -43,6 +44,7 @@ executables:
     - network-uri
     - aeson
     - time
+    - containers
 
 tests:
   echo-bot-test:
