@@ -83,7 +83,7 @@ receiveEvents h nextUpdateId = do
     h
     (ApiMethod "getUpdates")
     (A.object ["offset" .= nextUpdateId, "timeout" .= (25 :: Int)])
-    parseEvents
+    parseUpdatesResponse
 
 handleEvent :: Handle -> Event -> IO ()
 handleEvent h (MessageEvent message) =
@@ -258,8 +258,8 @@ endpointURI h (ApiMethod method) =
 instance Logger.Logger Handle IO where
   lowLevelLog = Logger.lowLevelLog . hLogHandle
 
-parseEvents :: A.Value -> A.Parser (Maybe UpdateId, [Event])
-parseEvents =
+parseUpdatesResponse :: A.Value -> A.Parser (Maybe UpdateId, [Event])
+parseUpdatesResponse =
   A.withObject "response" $ \r -> do
     updates <- r .: "result"
     (listToMaybe . reverse *** catMaybes) . unzip <$>
