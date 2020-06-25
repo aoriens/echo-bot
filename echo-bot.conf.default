@@ -25,6 +25,12 @@ log {
 
 # Telegram front-end configuration
 telegram {
-  # The API token of your telegram bot. Keep it in secret.
+  # The API token of your telegram bot. Keep it in secret. This is
+  # mandatory.
   # ApiToken = "123456789:ABABABABABABABABABABABABABABABABABABABABA"
+
+  # The poll timeout. The telegram server waits that much seconds
+  # before responding if nothing interesting occured. 1 hour is a
+  # default.
+  PollTimeout = 86400
 }

@@ -29,9 +29,14 @@ import qualified Network.HTTP.Client as Client
 import qualified Network.HTTP.Client.TLS as TLS
 import qualified Network.URI as URI
 
-newtype Config =
+data Config =
   Config
     { confApiToken :: Text
+    -- | Poll timeout in seconds. The telegram server will wait that
+    -- much before returning an empty list of events. A good value is
+    -- large: it reduces server load and clutter in debug logs. A
+    -- smaller value (e.g. zero) is convenient for debugging.
+    , confPollTimeout :: Int
     }
 
 data Handle =
@@ -77,11 +82,16 @@ run h = do
 
 receiveEvents :: Handle -> UpdateId -> IO (Maybe UpdateId, [Event])
 receiveEvents h nextUpdateId = do
-  getResponseWithMethod
+  getResponseWithMethodAndRequestModifier
     h
     (ApiMethod "getUpdates")
-    (A.object ["offset" .= nextUpdateId, "timeout" .= (25 :: Int)])
+    (A.object ["offset" .= nextUpdateId, "timeout" .= timeout])
+    (\httpRequest -> httpRequest {Client.responseTimeout = httpTimeout})
     parseUpdatesResponse
+  where
+    timeout = confPollTimeout $ hConfig h
+    connectionTimeout = timeout + 30
+    httpTimeout = Client.responseTimeoutMicro $ 1000000 * connectionTimeout
 
 handleEvent :: Handle -> Event -> IO ()
 handleEvent h (MessageEvent message) =
@@ -221,7 +231,18 @@ getResponseWithMethod ::
   -> request
   -> (A.Value -> A.Parser response)
   -> IO response
-getResponseWithMethod h method request parser = do
+getResponseWithMethod h method request =
+  getResponseWithMethodAndRequestModifier h method request id
+
+getResponseWithMethodAndRequestModifier ::
+     (A.ToJSON request)
+  => Handle
+  -> ApiMethod
+  -> request
+  -> (Client.Request -> Client.Request)
+  -> (A.Value -> A.Parser response)
+  -> IO response
+getResponseWithMethodAndRequestModifier h method request httpRequestModifier parser = do
   Logger.debug h $ "Send " .< method <> ": " .< A.encode request
   response <- getResponse
   Logger.debug h $ "Responded with " .< Client.responseBody response
@@ -234,7 +255,7 @@ getResponseWithMethod h method request parser = do
       Client.httpLbs httpRequest $ hHttpManager h
     getRequest = do
       httpRequest <- Client.requestFromURI $ endpointURI h method
-      pure
+      pure . httpRequestModifier $
         httpRequest
           { Client.checkResponse = Client.throwErrorStatusCodes
           , Client.method = "POST"

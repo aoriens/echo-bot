@@ -49,7 +49,12 @@ getTelegramConfig :: IO FrontEnd.Telegram.Config
 getTelegramConfig =
   withConfigFileSection "telegram" $ do
     apiToken <- require "ApiToken"
-    pure FrontEnd.Telegram.Config {FrontEnd.Telegram.confApiToken = apiToken}
+    pollTimeout <- lookupDefault "PollTimeout" 3600
+    pure
+      FrontEnd.Telegram.Config
+        { FrontEnd.Telegram.confApiToken = apiToken
+        , FrontEnd.Telegram.confPollTimeout = pollTimeout
+        }
 
 openLogFile :: FilePath -> IO Handle
 openLogFile "" = pure stderr
