@@ -37,6 +37,11 @@ data Config =
     -- large: it reduces server load and clutter in debug logs. A
     -- smaller value (e.g. zero) is convenient for debugging.
     , confPollTimeout :: Int
+    -- | Connection timeout in seconds. It is considered an error when
+    -- no response headers are accepted in this period. An obvious
+    -- exception is the poll request: its connection timeout is
+    -- confPollTimeout seconds more.
+    , confConnectionTimeout :: Int
     }
 
 data Handle =
@@ -85,12 +90,12 @@ receiveEvents h nextUpdateId = do
   getResponseWithMethodAndRequestModifier
     h
     (ApiMethod "getUpdates")
-    (A.object ["offset" .= nextUpdateId, "timeout" .= timeout])
+    (A.object ["offset" .= nextUpdateId, "timeout" .= pollTimeout])
     (\httpRequest -> httpRequest {Client.responseTimeout = httpTimeout})
     parseUpdatesResponse
   where
-    timeout = confPollTimeout $ hConfig h
-    connectionTimeout = timeout + 30
+    pollTimeout = confPollTimeout $ hConfig h
+    connectionTimeout = pollTimeout + confConnectionTimeout (hConfig h)
     httpTimeout = Client.responseTimeoutMicro $ 1000000 * connectionTimeout
 
 handleEvent :: Handle -> Event -> IO ()
@@ -261,7 +266,11 @@ getResponseWithMethodAndRequestModifier h method request httpRequestModifier par
           , Client.method = "POST"
           , Client.requestHeaders = [("Content-Type", "application/json")]
           , Client.requestBody = Client.RequestBodyLBS $ A.encode request
+          , Client.responseTimeout = defaultHttpTimeout
           }
+    defaultHttpTimeout =
+      Client.responseTimeoutMicro . (1000000 *) . confConnectionTimeout $
+      hConfig h
     getResult response =
       pure $ do
         value <- A.eitherDecode (Client.responseBody response)

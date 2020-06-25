@@ -33,4 +33,8 @@ telegram {
   # before responding if nothing interesting occured. 1 hour is a
   # default.
   PollTimeout = 86400
+
+  # The connection timeout. For poll request it is PollTimeout seconds
+  # more. 30 s is a default.
+  ConnectionTimeout = 30
 }

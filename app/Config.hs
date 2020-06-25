@@ -50,10 +50,12 @@ getTelegramConfig =
   withConfigFileSection "telegram" $ do
     apiToken <- require "ApiToken"
     pollTimeout <- lookupDefault "PollTimeout" 3600
+    connectionTimeout <- lookupDefault "ConnectionTimeout" 30
     pure
       FrontEnd.Telegram.Config
         { FrontEnd.Telegram.confApiToken = apiToken
         , FrontEnd.Telegram.confPollTimeout = pollTimeout
+        , FrontEnd.Telegram.confConnectionTimeout = connectionTimeout
         }
 
 openLogFile :: FilePath -> IO Handle
