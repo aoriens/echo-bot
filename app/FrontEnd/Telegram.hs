@@ -106,10 +106,9 @@ handleEvent h (MessageEvent message) =
     (EchoBot.MessageEvent $ messageText message)
 handleEvent h (MenuChoiceEvent callbackQuery) =
   void . runMaybeT $ do
-    lift . sendAnswerCallbackQueryRequest h $ cqId callbackQuery
+    confirmToServer
     menu <- findOpenMenuOrExit
-    when (cqMessageId callbackQuery /= omMessageId menu) $
-      exitWithBadMessageId menu
+    exitIfBadMessageId menu
     botRequest <- findBotRequestMatchingChoiceOrExit menu
     lift $ do
       closeMenuWithReplacementText
@@ -118,9 +117,14 @@ handleEvent h (MenuChoiceEvent callbackQuery) =
         "You have already made your choice"
       sendRequestToBotAndHandleOutput h chatId botRequest
   where
+    confirmToServer =
+      lift . sendAnswerCallbackQueryRequest h $ cqId callbackQuery
     findOpenMenuOrExit = do
       menus <- lift . readIORef $ hOpenMenus h
       maybe exitWithNoOpenMenu pure $ IntMap.lookup menuKey menus
+    exitIfBadMessageId menu =
+      when (cqMessageId callbackQuery /= omMessageId menu) $
+      exitWithBadMessageId menu
     findBotRequestMatchingChoiceOrExit menu =
       maybe exitWithWrongButton pure . lookup (cqData callbackQuery) $
       omChoiceMap menu
