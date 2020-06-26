@@ -48,11 +48,15 @@ data Handle =
   Handle
     { hBotHandle :: EchoBot.Handle IO
     , hLogHandle :: Logger.Handle IO
-    , hConfig :: Config
     , hHttpManager :: HTTP.Manager
     -- | Open menus keyed by ChatId. Each chat can have a dedicated
     -- open menu.
     , hOpenMenus :: IORef (IntMap OpenMenu)
+    -- Fields copied from Config and optionally cleaned up or
+    -- canonicalized
+    , hApiToken :: Text
+    , hPollTimeout :: Int
+    , hConnectionTimeout :: Int
     }
 
 -- | Data to describe the currently open menu in a specific chat.
@@ -71,9 +75,11 @@ new botHandle logHandle config = do
     Handle
       { hBotHandle = botHandle
       , hLogHandle = logHandle
-      , hConfig = config
       , hHttpManager = httpManager
       , hOpenMenus = menus
+      , hApiToken = confApiToken config
+      , hPollTimeout = confPollTimeout config
+      , hConnectionTimeout = confConnectionTimeout config
       }
 
 run :: Handle -> IO ()
@@ -94,8 +100,8 @@ receiveEvents h nextUpdateId = do
     (\httpRequest -> httpRequest {HTTP.responseTimeout = httpTimeout})
     parseUpdatesResponse
   where
-    pollTimeout = confPollTimeout $ hConfig h
-    connectionTimeout = pollTimeout + confConnectionTimeout (hConfig h)
+    pollTimeout = hPollTimeout h
+    connectionTimeout = pollTimeout + hConnectionTimeout h
     httpTimeout = HTTP.responseTimeoutMicro $ 1000000 * connectionTimeout
 
 handleEvent :: Handle -> Event -> IO ()
@@ -273,8 +279,7 @@ getResponseWithMethodAndRequestModifier h method request httpRequestModifier par
           , HTTP.responseTimeout = defaultHttpTimeout
           }
     defaultHttpTimeout =
-      HTTP.responseTimeoutMicro . (1000000 *) . confConnectionTimeout $
-      hConfig h
+      HTTP.responseTimeoutMicro . (1000000 *) $ hConnectionTimeout h
     getResult response =
       pure $ do
         value <- A.eitherDecode (HTTP.responseBody response)
@@ -291,7 +296,7 @@ endpointURI h (ApiMethod method) =
   fromMaybe (error $ "Bad URI: " ++ uri) . URI.parseURI $ uri
   where
     uri = "https://api.telegram.org/bot" ++ apiToken ++ "/" ++ method
-    apiToken = T.unpack . confApiToken . hConfig $ h
+    apiToken = T.unpack $ hApiToken h
 
 instance Logger.Logger Handle IO where
   lowLevelLog = Logger.lowLevelLog . hLogHandle
