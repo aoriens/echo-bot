@@ -31,7 +31,12 @@ import qualified Network.URI as URI
 
 data Config =
   Config
+    -- | API token to authorize the Telegram bot. It is to be
+    -- registered using Telegram documentation and kept in secret.
     { confApiToken :: Text
+    -- | API URL prefix, e.g. https://api.telegram.com/ . A trailing
+    -- slash is optional and acceptable.
+    , confURLPrefix :: Text
     -- | Poll timeout in seconds. The telegram server will wait that
     -- much before returning an empty list of events. A good value is
     -- large: it reduces server load and clutter in debug logs. A
@@ -55,6 +60,7 @@ data Handle =
     -- Fields copied from Config and optionally cleaned up or
     -- canonicalized
     , hApiToken :: Text
+    , hURLPrefixWithoutTrailingSlash :: String
     , hPollTimeout :: Int
     , hConnectionTimeout :: Int
     }
@@ -78,6 +84,8 @@ new botHandle logHandle config = do
       , hHttpManager = httpManager
       , hOpenMenus = menus
       , hApiToken = confApiToken config
+      , hURLPrefixWithoutTrailingSlash =
+          T.unpack . T.dropWhileEnd (== '/') $ confURLPrefix config
       , hPollTimeout = confPollTimeout config
       , hConnectionTimeout = confConnectionTimeout config
       }
@@ -295,7 +303,8 @@ endpointURI :: Handle -> ApiMethod -> URI.URI
 endpointURI h (ApiMethod method) =
   fromMaybe (error $ "Bad URI: " ++ uri) . URI.parseURI $ uri
   where
-    uri = "https://api.telegram.org/bot" ++ apiToken ++ "/" ++ method
+    uri =
+      hURLPrefixWithoutTrailingSlash h ++ "/bot" ++ apiToken ++ "/" ++ method
     apiToken = T.unpack $ hApiToken h
 
 instance Logger.Logger Handle IO where

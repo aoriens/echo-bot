@@ -50,11 +50,13 @@ getTelegramConfig :: IO FrontEnd.Telegram.Config
 getTelegramConfig =
   withConfigFileSection "telegram" $ do
     apiToken <- require "ApiToken"
+    urlPrefix <- lookupDefault "URLPrefix" "https://api.telegram.org"
     pollTimeout <- lookupDefault "PollTimeout" 3600
     connectionTimeout <- lookupDefault "ConnectionTimeout" 30
     pure
       FrontEnd.Telegram.Config
         { FrontEnd.Telegram.confApiToken = apiToken
+        , FrontEnd.Telegram.confURLPrefix = urlPrefix
         , FrontEnd.Telegram.confPollTimeout = pollTimeout
         , FrontEnd.Telegram.confConnectionTimeout = connectionTimeout
         }

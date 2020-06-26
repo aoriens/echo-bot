@@ -38,6 +38,9 @@ telegram {
   # mandatory.
   # ApiToken = "123456789:ABABABABABABABABABABABABABABABABABABABABA"
 
+  # The server URL prefix. https://api.telegram.org is a default.
+  URLPrefix = "https://api.telegram.org"
+
   # The poll timeout. The telegram server waits that much seconds
   # before responding if nothing interesting occured. 1 hour is a
   # default.
