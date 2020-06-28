@@ -42,9 +42,10 @@ telegram {
   URLPrefix = "https://api.telegram.org"
 
   # The poll timeout. The telegram server waits that much seconds
-  # before responding if nothing interesting occured. 1 hour is a
-  # default.
-  PollTimeout = 86400
+  # before responding if nothing interesting occured. 60 seconds is a
+  # default. Larger values can decrease server load, but they can also
+  # increase time to detect connection failure.
+  PollTimeout = 600
 
   # The connection timeout. For poll request it is PollTimeout seconds
   # more. 30 s is a default.
