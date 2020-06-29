@@ -9,7 +9,7 @@ import Data.IORef
 import qualified Data.Text as T
 import qualified EchoBot
 import qualified FrontEnd.Console
-import qualified FrontEnd.Telegram.Core
+import qualified FrontEnd.Telegram
 import qualified FrontEnd.Telegram.Impl.HTTP
 import qualified Logger
 import qualified Logger.Impl
@@ -33,7 +33,7 @@ runTelegramFrontEnd :: Logger.Handle IO -> EchoBot.Handle IO -> IO ()
 runTelegramFrontEnd logHandle botHandle = do
   config <- Config.getTelegramConfig
   handle <- FrontEnd.Telegram.Impl.HTTP.new botHandle logHandle config
-  FrontEnd.Telegram.Core.run handle
+  FrontEnd.Telegram.run handle
 
 getLogHandle :: IO (Logger.Handle IO)
 getLogHandle = Logger.Impl.new <$> Config.getLoggerConfig

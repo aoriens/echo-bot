@@ -4,7 +4,7 @@
 -- | The module connects the bot business logic and the Telegram
 -- messenger protocol. It is to be isolated from concrete libraries
 -- and I/O yet in order to be tested.
-module FrontEnd.Telegram.Core
+module FrontEnd.Telegram
   ( makeState
   , run
   , Handle(..)

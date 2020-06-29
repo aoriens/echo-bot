@@ -10,7 +10,7 @@ import Data.IORef
 import Data.Maybe
 import Data.String
 import qualified EchoBot
-import FrontEnd.Telegram.Core
+import FrontEnd.Telegram
 import qualified Logger
 import qualified Network.HTTP.Client as HTTP
 import qualified Network.HTTP.Client.TLS as TLS
