@@ -19,10 +19,12 @@ import Control.Monad.Trans.Maybe
 import qualified Data.Aeson as A
 import Data.Aeson ((.:), (.=))
 import qualified Data.Aeson.Types as A
+import qualified Data.ByteString.Lazy as BS
 import Data.IORef
 import qualified Data.IntMap.Lazy as IntMap
 import Data.IntMap.Lazy (IntMap)
 import Data.Maybe
+import Data.String
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified EchoBot
@@ -76,6 +78,19 @@ data OpenMenu =
     , omChoiceMap :: [(CallbackData, EchoBot.Event)]
     }
 
+-- | HTTP request value, independent of specific libraries.
+data HttpRequest =
+  HttpRequest
+    { hrMethod :: HttpMethod
+    , hrURI :: String
+    , hrHeaders :: [(String, String)]
+    , hrBody :: BS.ByteString
+    , hrResponseTimeout :: Int
+    }
+
+data HttpMethod =
+  POST
+
 new :: EchoBot.Handle IO -> Logger.Handle IO -> Config -> IO Handle
 new botHandle logHandle config = do
   httpManager <- HTTP.newManager TLS.tlsManagerSettings
@@ -108,12 +123,11 @@ receiveEvents h nextUpdateId = do
     h
     (ApiMethod "getUpdates")
     (A.object ["offset" .= nextUpdateId, "timeout" .= pollTimeout])
-    (\httpRequest -> httpRequest {HTTP.responseTimeout = httpTimeout})
+    (\request ->
+       request {hrResponseTimeout = hrResponseTimeout request + pollTimeout})
     parseUpdatesResponse
   where
     pollTimeout = hPollTimeout h
-    connectionTimeout = pollTimeout + hConnectionTimeout h
-    httpTimeout = HTTP.responseTimeoutMicro $ 1000000 * connectionTimeout
 
 handleEvent :: Handle -> Event -> IO ()
 handleEvent h (MessageEvent message) =
@@ -265,49 +279,61 @@ getResponseWithMethodAndRequestModifier ::
   => Handle
   -> ApiMethod
   -> request
-  -> (HTTP.Request -> HTTP.Request)
+  -> (HttpRequest -> HttpRequest)
   -> (A.Value -> A.Parser response)
   -> IO response
 getResponseWithMethodAndRequestModifier h method request httpRequestModifier parser = do
   Logger.debug h $ "Send " .< method <> ": " .< A.encode request
-  response <- getResponse
-  Logger.debug h $ "Responded with " .< HTTP.responseBody response
+  response <- getHttpResponse h httpRequest
+  Logger.debug h $ "Responded with " .< response
   result <- getResult response
   logResult result
   pure $ either error id result
   where
-    getResponse = do
-      httpRequest <- getRequest
-      HTTP.httpLbs httpRequest $ hHttpManager h
-    getRequest = do
-      httpRequest <- HTTP.requestFromURI $ endpointURI h method
-      pure . httpRequestModifier $
-        httpRequest
-          { HTTP.checkResponse = HTTP.throwErrorStatusCodes
-          , HTTP.method = "POST"
-          , HTTP.requestHeaders = [("Content-Type", "application/json")]
-          , HTTP.requestBody = HTTP.RequestBodyLBS $ A.encode request
-          , HTTP.responseTimeout = defaultHttpTimeout
+    httpRequest =
+      httpRequestModifier
+        HttpRequest
+          { hrMethod = POST
+          , hrURI = endpointURI h method
+          , hrHeaders = [("Content-Type", "application/json")]
+          , hrBody = A.encode request
+          , hrResponseTimeout = hConnectionTimeout h
           }
-    defaultHttpTimeout =
-      HTTP.responseTimeoutMicro . (1000000 *) $ hConnectionTimeout h
     getResult response =
       pure $ do
-        value <- A.eitherDecode (HTTP.responseBody response)
+        value <- A.eitherDecode response
         A.parseEither parser value
     logResult (Left e) = Logger.error h $ "Response error: " <> T.pack e
     logResult _ = pure ()
+
+getHttpResponse :: Handle -> HttpRequest -> IO BS.ByteString
+getHttpResponse h request = do
+  httpRequest <- configureRequest <$> HTTP.requestFromURI uri
+  HTTP.responseBody <$> HTTP.httpLbs httpRequest (hHttpManager h)
+  where
+    configureRequest httpRequest =
+      httpRequest
+        { HTTP.checkResponse = HTTP.throwErrorStatusCodes
+        , HTTP.method = methodString $ hrMethod request
+        , HTTP.requestHeaders =
+            map (fromString *** fromString) $ hrHeaders request
+        , HTTP.requestBody = HTTP.RequestBodyLBS $ hrBody request
+        , HTTP.responseTimeout =
+            HTTP.responseTimeoutMicro . (1000000 *) $ hrResponseTimeout request
+        }
+    uri =
+      fromMaybe (error $ "Bad URI: " ++ uriString) . URI.parseURI $ uriString
+    uriString = hrURI request
+    methodString POST = "POST"
 
 executeMethod :: (A.ToJSON request) => Handle -> ApiMethod -> request -> IO ()
 executeMethod h method request =
   getResponseWithMethod h method request (const $ pure ())
 
-endpointURI :: Handle -> ApiMethod -> URI.URI
+endpointURI :: Handle -> ApiMethod -> String
 endpointURI h (ApiMethod method) =
-  fromMaybe (error $ "Bad URI: " ++ uri) . URI.parseURI $ uri
+  hURLPrefixWithoutTrailingSlash h ++ "/bot" ++ apiToken ++ "/" ++ method
   where
-    uri =
-      hURLPrefixWithoutTrailingSlash h ++ "/bot" ++ apiToken ++ "/" ++ method
     apiToken = T.unpack $ hApiToken h
 
 instance Logger.Logger Handle IO where

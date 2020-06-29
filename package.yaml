@@ -45,6 +45,7 @@ executables:
     - aeson
     - time
     - containers
+    - bytestring
 
 tests:
   echo-bot-test:
