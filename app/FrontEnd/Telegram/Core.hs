@@ -9,6 +9,8 @@ module FrontEnd.Telegram.Core
   , run
   , Handle
   , Config(..)
+  , HttpRequest(..)
+  , HttpMethod(..)
   ) where
 
 import Control.Applicative
@@ -24,15 +26,11 @@ import Data.IORef
 import qualified Data.IntMap.Lazy as IntMap
 import Data.IntMap.Lazy (IntMap)
 import Data.Maybe
-import Data.String
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified EchoBot
 import qualified Logger
 import Logger ((.<))
-import qualified Network.HTTP.Client as HTTP
-import qualified Network.HTTP.Client.TLS as TLS
-import qualified Network.URI as URI
 
 data Config =
   Config
@@ -58,7 +56,7 @@ data Handle =
   Handle
     { hBotHandle :: EchoBot.Handle IO
     , hLogHandle :: Logger.Handle IO
-    , hHttpManager :: HTTP.Manager
+    , hGetHttpResponse :: HttpRequest -> IO BS.ByteString
     -- | Open menus keyed by ChatId. Each chat can have a dedicated
     -- open menu.
     , hOpenMenus :: IORef (IntMap OpenMenu)
@@ -91,15 +89,19 @@ data HttpRequest =
 data HttpMethod =
   POST
 
-new :: EchoBot.Handle IO -> Logger.Handle IO -> Config -> IO Handle
-new botHandle logHandle config = do
-  httpManager <- HTTP.newManager TLS.tlsManagerSettings
+new ::
+     EchoBot.Handle IO
+  -> Logger.Handle IO
+  -> (HttpRequest -> IO BS.ByteString)
+  -> Config
+  -> IO Handle
+new botHandle logHandle getHttpResponse config = do
   menus <- newIORef mempty
   pure
     Handle
       { hBotHandle = botHandle
       , hLogHandle = logHandle
-      , hHttpManager = httpManager
+      , hGetHttpResponse = getHttpResponse
       , hOpenMenus = menus
       , hApiToken = confApiToken config
       , hURLPrefixWithoutTrailingSlash =
@@ -284,7 +286,7 @@ getResponseWithMethodAndRequestModifier ::
   -> IO response
 getResponseWithMethodAndRequestModifier h method request httpRequestModifier parser = do
   Logger.debug h $ "Send " .< method <> ": " .< A.encode request
-  response <- getHttpResponse h httpRequest
+  response <- hGetHttpResponse h httpRequest
   Logger.debug h $ "Responded with " .< response
   result <- getResult response
   logResult result
@@ -305,26 +307,6 @@ getResponseWithMethodAndRequestModifier h method request httpRequestModifier par
         A.parseEither parser value
     logResult (Left e) = Logger.error h $ "Response error: " <> T.pack e
     logResult _ = pure ()
-
-getHttpResponse :: Handle -> HttpRequest -> IO BS.ByteString
-getHttpResponse h request = do
-  httpRequest <- configureRequest <$> HTTP.requestFromURI uri
-  HTTP.responseBody <$> HTTP.httpLbs httpRequest (hHttpManager h)
-  where
-    configureRequest httpRequest =
-      httpRequest
-        { HTTP.checkResponse = HTTP.throwErrorStatusCodes
-        , HTTP.method = methodString $ hrMethod request
-        , HTTP.requestHeaders =
-            map (fromString *** fromString) $ hrHeaders request
-        , HTTP.requestBody = HTTP.RequestBodyLBS $ hrBody request
-        , HTTP.responseTimeout =
-            HTTP.responseTimeoutMicro . (1000000 *) $ hrResponseTimeout request
-        }
-    uri =
-      fromMaybe (error $ "Bad URI: " ++ uriString) . URI.parseURI $ uriString
-    uriString = hrURI request
-    methodString POST = "POST"
 
 executeMethod :: (A.ToJSON request) => Handle -> ApiMethod -> request -> IO ()
 executeMethod h method request =
