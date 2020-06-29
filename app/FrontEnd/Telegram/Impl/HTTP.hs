@@ -19,13 +19,14 @@ import qualified Network.URI as URI
 new :: EchoBot.Handle IO -> Logger.Handle IO -> Config -> IO Handle
 new botHandle logHandle config = do
   httpManager <- HTTP.newManager TLS.tlsManagerSettings
-  state <- newIORef makeState
+  stateRef <- newIORef makeState
   pure
     Handle
       { hBotHandle = botHandle
       , hLogHandle = logHandle
       , hGetHttpResponse = getHttpResponse httpManager
-      , hState = state
+      , hGetState = readIORef stateRef
+      , hModifyState' = modifyIORef' stateRef
       , hConfig = config
       }
 

@@ -23,7 +23,6 @@ import qualified Data.Aeson as A
 import Data.Aeson ((.:), (.=))
 import qualified Data.Aeson.Types as A
 import qualified Data.ByteString.Lazy as BS
-import Data.IORef
 import qualified Data.IntMap.Lazy as IntMap
 import Data.IntMap.Lazy (IntMap)
 import Data.Maybe
@@ -58,7 +57,8 @@ data Handle =
     { hBotHandle :: EchoBot.Handle IO
     , hLogHandle :: Logger.Handle IO
     , hGetHttpResponse :: HttpRequest -> IO BS.ByteString
-    , hState :: IORef State
+    , hGetState :: IO State
+    , hModifyState' :: (State -> State) -> IO ()
     , hConfig :: Config
     }
 
@@ -94,13 +94,12 @@ makeState :: State
 makeState = State mempty
 
 run :: Handle -> IO ()
-run h = do
-  nextUpdateIdRef <- newIORef $ UpdateId 0
-  forever $ do
-    nextUpdateId <- readIORef nextUpdateIdRef
-    (lastId, events) <- receiveEvents h nextUpdateId
-    forM_ events $ handleEvent h
-    whenJust lastId $ writeIORef nextUpdateIdRef . succ
+run h = go $ UpdateId 0
+  where
+    go nextUpdateId = do
+      (lastId, events) <- receiveEvents h nextUpdateId
+      forM_ events $ handleEvent h
+      go $ maybe nextUpdateId succ lastId
 
 receiveEvents :: Handle -> UpdateId -> IO (Maybe UpdateId, [Event])
 receiveEvents h nextUpdateId = do
@@ -136,7 +135,7 @@ handleEvent h (MenuChoiceEvent callbackQuery) =
     confirmToServer =
       lift . sendAnswerCallbackQueryRequest h $ cqId callbackQuery
     findOpenMenuOrExit = do
-      menus <- stOpenMenus <$> (lift . readIORef $ hState h)
+      menus <- stOpenMenus <$> lift (hGetState h)
       maybe exitWithNoOpenMenu pure $ IntMap.lookup menuKey menus
     exitIfBadMessageId menu =
       when (cqMessageId callbackQuery /= omMessageId menu) $
@@ -176,7 +175,7 @@ openMenu h chatId title opts = do
   Logger.info h "Sending a message with menu"
   messageId <-
     sendMessageWithInlineKeyboard h chatId title [zip callbackDataList labels]
-  modifyIORef' (hState h) $
+  hModifyState' h $
     State . IntMap.insert (unChatId chatId) (makeMenu messageId) . stOpenMenus
   where
     callbackDataList = map (CallbackData . T.pack . show) ([0 ..] :: [Int])
@@ -192,12 +191,12 @@ openMenu h chatId title opts = do
 -- table.
 closeMenuWithReplacementText :: Handle -> ChatId -> Text -> IO ()
 closeMenuWithReplacementText h chatId replacementText = do
-  menus <- stOpenMenus <$> readIORef (hState h)
+  menus <- stOpenMenus <$> hGetState h
   let (maybeMenu, menus') =
         IntMap.updateLookupWithKey (\_ _ -> Nothing) menuKey menus
   whenJust maybeMenu $ \menu -> do
     Logger.info h $ "Closing menu with replacement text: " <> replacementText
-    writeIORef (hState h) $ State menus'
+    hModifyState' h $ const (State menus')
     deleteMenuFromChat menu
   where
     menuKey = unChatId chatId
