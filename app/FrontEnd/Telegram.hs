@@ -2,9 +2,6 @@
 
 module FrontEnd.Telegram
   ( new
-  , run
-  , Handle
-  , Config(..)
   ) where
 
 import Control.Arrow

@@ -13,7 +13,7 @@ import qualified Data.Configurator as C
 import qualified Data.Configurator.Types as C
 import qualified Data.Text as T
 import qualified EchoBot
-import qualified FrontEnd.Telegram
+import qualified FrontEnd.Telegram.Core
 import qualified Logger
 import qualified Logger.Impl
 import qualified Main.ConfigurationTypes as Main
@@ -46,7 +46,7 @@ getLoggerConfig =
       Logger.Impl.Handle
         {Logger.Impl.hFileHandle = fileHandle, Logger.Impl.hMinLevel = level}
 
-getTelegramConfig :: IO FrontEnd.Telegram.Config
+getTelegramConfig :: IO FrontEnd.Telegram.Core.Config
 getTelegramConfig =
   withConfigFileSection "telegram" $ do
     apiToken <- require "ApiToken"
@@ -54,12 +54,12 @@ getTelegramConfig =
     pollTimeout <- lookupDefault "PollTimeout" 60
     connectionTimeout <- lookupDefault "ConnectionTimeout" 30
     pure
-      FrontEnd.Telegram.Config
-        { FrontEnd.Telegram.confApiToken = apiToken
-        , FrontEnd.Telegram.confURLPrefixWithoutTrailingSlash =
+      FrontEnd.Telegram.Core.Config
+        { FrontEnd.Telegram.Core.confApiToken = apiToken
+        , FrontEnd.Telegram.Core.confURLPrefixWithoutTrailingSlash =
             T.unpack $ unslash urlPrefix
-        , FrontEnd.Telegram.confPollTimeout = pollTimeout
-        , FrontEnd.Telegram.confConnectionTimeout = connectionTimeout
+        , FrontEnd.Telegram.Core.confPollTimeout = pollTimeout
+        , FrontEnd.Telegram.Core.confConnectionTimeout = connectionTimeout
         }
   where
     unslash = T.dropWhileEnd (== '/')
