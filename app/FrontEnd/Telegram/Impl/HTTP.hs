@@ -16,7 +16,7 @@ import qualified Network.HTTP.Client as HTTP
 import qualified Network.HTTP.Client.TLS as TLS
 import qualified Network.URI as URI
 
-new :: EchoBot.Handle IO -> Logger.Handle IO -> Config -> IO Handle
+new :: EchoBot.Handle IO -> Logger.Handle IO -> Config -> IO (Handle IO)
 new botHandle logHandle config = do
   httpManager <- HTTP.newManager TLS.tlsManagerSettings
   stateRef <- newIORef makeState

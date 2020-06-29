@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving,
-  MultiParamTypeClasses #-}
+  MultiParamTypeClasses, FlexibleInstances #-}
 
 -- | The module connects the bot business logic and the Telegram
 -- messenger protocol. It is to be isolated from concrete libraries
@@ -52,13 +52,13 @@ data Config =
     , confConnectionTimeout :: Int
     }
 
-data Handle =
+data Handle m =
   Handle
-    { hBotHandle :: EchoBot.Handle IO
-    , hLogHandle :: Logger.Handle IO
-    , hGetHttpResponse :: HttpRequest -> IO BS.ByteString
-    , hGetState :: IO State
-    , hModifyState' :: (State -> State) -> IO ()
+    { hBotHandle :: EchoBot.Handle m
+    , hLogHandle :: Logger.Handle m
+    , hGetHttpResponse :: HttpRequest -> m BS.ByteString
+    , hGetState :: m State
+    , hModifyState' :: (State -> State) -> m ()
     , hConfig :: Config
     }
 
@@ -93,7 +93,7 @@ data HttpMethod =
 makeState :: State
 makeState = State mempty
 
-run :: Handle -> IO ()
+run :: Monad m => Handle m -> m ()
 run h = go $ UpdateId 0
   where
     go nextUpdateId = do
@@ -101,7 +101,7 @@ run h = go $ UpdateId 0
       forM_ events $ handleEvent h
       go $ maybe nextUpdateId succ lastId
 
-receiveEvents :: Handle -> UpdateId -> IO (Maybe UpdateId, [Event])
+receiveEvents :: Monad m => Handle m -> UpdateId -> m (Maybe UpdateId, [Event])
 receiveEvents h nextUpdateId = do
   getResponseWithMethodAndRequestModifier
     h
@@ -113,7 +113,7 @@ receiveEvents h nextUpdateId = do
   where
     pollTimeout = confPollTimeout $ hConfig h
 
-handleEvent :: Handle -> Event -> IO ()
+handleEvent :: Monad m => Handle m -> Event -> m ()
 handleEvent h (MessageEvent message) =
   sendRequestToBotAndHandleOutput
     h
@@ -159,7 +159,8 @@ handleEvent h (MenuChoiceEvent callbackQuery) =
     menuKey = unChatId chatId
     chatId = cqChatId callbackQuery
 
-sendRequestToBotAndHandleOutput :: Handle -> ChatId -> EchoBot.Event -> IO ()
+sendRequestToBotAndHandleOutput ::
+     Monad m => Handle m -> ChatId -> EchoBot.Event -> m ()
 sendRequestToBotAndHandleOutput h chatId request = do
   response <- EchoBot.respond (hBotHandle h) request
   case response of
@@ -169,7 +170,8 @@ sendRequestToBotAndHandleOutput h chatId request = do
 
 -- | Sends a menu with repetition count options. Currently no other
 -- menus are implemented.
-openMenu :: Handle -> ChatId -> Text -> [(Int, EchoBot.Event)] -> IO ()
+openMenu ::
+     Monad m => Handle m -> ChatId -> Text -> [(Int, EchoBot.Event)] -> m ()
 openMenu h chatId title opts = do
   closeMenuWithReplacementText h chatId "The menu is now out-of-date"
   Logger.info h "Sending a message with menu"
@@ -189,7 +191,7 @@ openMenu h chatId title opts = do
 
 -- | Safely deletes menu both from the chat and from the pending menu
 -- table.
-closeMenuWithReplacementText :: Handle -> ChatId -> Text -> IO ()
+closeMenuWithReplacementText :: Monad m => Handle m -> ChatId -> Text -> m ()
 closeMenuWithReplacementText h chatId replacementText = do
   menus <- stOpenMenus <$> hGetState h
   let (maybeMenu, menus') =
@@ -208,7 +210,7 @@ closeMenuWithReplacementText h chatId replacementText = do
         (makeEditedTitle menu)
     makeEditedTitle menu = omTitle menu <> "\n(" <> replacementText <> ")"
 
-sendMessage :: Handle -> ChatId -> Text -> IO ()
+sendMessage :: Monad m => Handle m -> ChatId -> Text -> m ()
 sendMessage h chatId text = do
   executeMethod
     h
@@ -216,7 +218,12 @@ sendMessage h chatId text = do
     (A.object ["chat_id" .= chatId, "text" .= text])
 
 sendMessageWithInlineKeyboard ::
-     Handle -> ChatId -> Text -> [[(CallbackData, Text)]] -> IO MessageId
+     Monad m
+  => Handle m
+  -> ChatId
+  -> Text
+  -> [[(CallbackData, Text)]]
+  -> m MessageId
 sendMessageWithInlineKeyboard h chatId title opts =
   getResponseWithMethod h (ApiMethod "sendMessage") request parseMessageId
   where
@@ -234,14 +241,15 @@ sendMessageWithInlineKeyboard h chatId title opts =
         message <- r .: "result"
         message .: "message_id"
 
-sendAnswerCallbackQueryRequest :: Handle -> CallbackQueryId -> IO ()
+sendAnswerCallbackQueryRequest :: Monad m => Handle m -> CallbackQueryId -> m ()
 sendAnswerCallbackQueryRequest h queryId =
   executeMethod
     h
     (ApiMethod "answerCallbackQuery")
     (A.object ["callback_query_id" .= queryId])
 
-sendEditMessageTextRequest :: Handle -> ChatId -> MessageId -> Text -> IO ()
+sendEditMessageTextRequest ::
+     Monad m => Handle m -> ChatId -> MessageId -> Text -> m ()
 sendEditMessageTextRequest h chatId messageId text =
   executeMethod
     h
@@ -249,23 +257,23 @@ sendEditMessageTextRequest h chatId messageId text =
     (A.object ["chat_id" .= chatId, "message_id" .= messageId, "text" .= text])
 
 getResponseWithMethod ::
-     (A.ToJSON request)
-  => Handle
+     (A.ToJSON request, Monad m)
+  => Handle m
   -> ApiMethod
   -> request
   -> (A.Value -> A.Parser response)
-  -> IO response
+  -> m response
 getResponseWithMethod h method request =
   getResponseWithMethodAndRequestModifier h method request id
 
 getResponseWithMethodAndRequestModifier ::
-     (A.ToJSON request)
-  => Handle
+     (A.ToJSON request, Monad m)
+  => Handle m
   -> ApiMethod
   -> request
   -> (HttpRequest -> HttpRequest)
   -> (A.Value -> A.Parser response)
-  -> IO response
+  -> m response
 getResponseWithMethodAndRequestModifier h method request httpRequestModifier parser = do
   Logger.debug h $ "Send " .< method <> ": " .< A.encode request
   response <- hGetHttpResponse h httpRequest
@@ -290,18 +298,19 @@ getResponseWithMethodAndRequestModifier h method request httpRequestModifier par
     logResult (Left e) = Logger.error h $ "Response error: " <> T.pack e
     logResult _ = pure ()
 
-executeMethod :: (A.ToJSON request) => Handle -> ApiMethod -> request -> IO ()
+executeMethod ::
+     (A.ToJSON request, Monad m) => Handle m -> ApiMethod -> request -> m ()
 executeMethod h method request =
   getResponseWithMethod h method request (const $ pure ())
 
-endpointURI :: Handle -> ApiMethod -> String
+endpointURI :: Handle m -> ApiMethod -> String
 endpointURI h (ApiMethod method) =
   urlPrefix ++ "/bot" ++ apiToken ++ "/" ++ method
   where
     urlPrefix = confURLPrefixWithoutTrailingSlash (hConfig h)
     apiToken = T.unpack . confApiToken $ hConfig h
 
-instance Logger.Logger Handle IO where
+instance Logger.Logger (Handle m) m where
   lowLevelLog = Logger.lowLevelLog . hLogHandle
 
 parseUpdatesResponse :: A.Value -> A.Parser (Maybe UpdateId, [Event])
