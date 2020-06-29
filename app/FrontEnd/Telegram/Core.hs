@@ -38,9 +38,9 @@ data Config =
     -- | API token to authorize the Telegram bot. It is to be
     -- registered using Telegram documentation and kept in secret.
     { confApiToken :: Text
-    -- | API URL prefix, e.g. https://api.telegram.com/ . A trailing
-    -- slash is optional and acceptable.
-    , confURLPrefix :: Text
+    -- | API URL prefix, e.g. https://api.telegram.com . It is not
+    -- assumed to have a trailing slash.
+    , confURLPrefixWithoutTrailingSlash :: String
     -- | Poll timeout in seconds. The telegram server will wait that
     -- much before returning an empty list of events. A good value is
     -- large: it reduces server load and clutter in debug logs. A
@@ -59,12 +59,7 @@ data Handle =
     , hLogHandle :: Logger.Handle IO
     , hGetHttpResponse :: HttpRequest -> IO BS.ByteString
     , hState :: IORef State
-    -- Fields copied from Config and optionally cleaned up or
-    -- canonicalized
-    , hApiToken :: Text
-    , hURLPrefixWithoutTrailingSlash :: String
-    , hPollTimeout :: Int
-    , hConnectionTimeout :: Int
+    , hConfig :: Config
     }
 
 newtype State =
@@ -109,11 +104,7 @@ new botHandle logHandle getHttpResponse config = do
       , hLogHandle = logHandle
       , hGetHttpResponse = getHttpResponse
       , hState = state
-      , hApiToken = confApiToken config
-      , hURLPrefixWithoutTrailingSlash =
-          T.unpack . T.dropWhileEnd (== '/') $ confURLPrefix config
-      , hPollTimeout = confPollTimeout config
-      , hConnectionTimeout = confConnectionTimeout config
+      , hConfig = config
       }
 
 run :: Handle -> IO ()
@@ -135,7 +126,7 @@ receiveEvents h nextUpdateId = do
        request {hrResponseTimeout = hrResponseTimeout request + pollTimeout})
     parseUpdatesResponse
   where
-    pollTimeout = hPollTimeout h
+    pollTimeout = confPollTimeout $ hConfig h
 
 handleEvent :: Handle -> Event -> IO ()
 handleEvent h (MessageEvent message) =
@@ -305,7 +296,7 @@ getResponseWithMethodAndRequestModifier h method request httpRequestModifier par
           , hrURI = endpointURI h method
           , hrHeaders = [("Content-Type", "application/json")]
           , hrBody = A.encode request
-          , hrResponseTimeout = hConnectionTimeout h
+          , hrResponseTimeout = confConnectionTimeout $ hConfig h
           }
     getResult response =
       pure $ do
@@ -320,9 +311,10 @@ executeMethod h method request =
 
 endpointURI :: Handle -> ApiMethod -> String
 endpointURI h (ApiMethod method) =
-  hURLPrefixWithoutTrailingSlash h ++ "/bot" ++ apiToken ++ "/" ++ method
+  urlPrefix ++ "/bot" ++ apiToken ++ "/" ++ method
   where
-    apiToken = T.unpack $ hApiToken h
+    urlPrefix = confURLPrefixWithoutTrailingSlash (hConfig h)
+    apiToken = T.unpack . confApiToken $ hConfig h
 
 instance Logger.Logger Handle IO where
   lowLevelLog = Logger.lowLevelLog . hLogHandle
