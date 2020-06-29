@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module FrontEnd.Telegram
+module FrontEnd.Telegram.Impl.HTTP
   ( new
   ) where
 
