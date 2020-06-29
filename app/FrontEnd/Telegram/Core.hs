@@ -8,6 +8,7 @@ module FrontEnd.Telegram.Core
   ( new
   , run
   , Handle
+  , State
   , Config(..)
   , HttpRequest(..)
   , HttpMethod(..)
@@ -57,15 +58,20 @@ data Handle =
     { hBotHandle :: EchoBot.Handle IO
     , hLogHandle :: Logger.Handle IO
     , hGetHttpResponse :: HttpRequest -> IO BS.ByteString
-    -- | Open menus keyed by ChatId. Each chat can have a dedicated
-    -- open menu.
-    , hOpenMenus :: IORef (IntMap OpenMenu)
+    , hState :: IORef State
     -- Fields copied from Config and optionally cleaned up or
     -- canonicalized
     , hApiToken :: Text
     , hURLPrefixWithoutTrailingSlash :: String
     , hPollTimeout :: Int
     , hConnectionTimeout :: Int
+    }
+
+newtype State =
+  State
+      -- | Open menus keyed by ChatId. Each chat can have a dedicated
+      -- open menu.
+    { stOpenMenus :: IntMap OpenMenu
     }
 
 -- | Data to describe the currently open menu in a specific chat.
@@ -96,13 +102,13 @@ new ::
   -> Config
   -> IO Handle
 new botHandle logHandle getHttpResponse config = do
-  menus <- newIORef mempty
+  state <- newIORef $ State mempty
   pure
     Handle
       { hBotHandle = botHandle
       , hLogHandle = logHandle
       , hGetHttpResponse = getHttpResponse
-      , hOpenMenus = menus
+      , hState = state
       , hApiToken = confApiToken config
       , hURLPrefixWithoutTrailingSlash =
           T.unpack . T.dropWhileEnd (== '/') $ confURLPrefix config
@@ -153,7 +159,7 @@ handleEvent h (MenuChoiceEvent callbackQuery) =
     confirmToServer =
       lift . sendAnswerCallbackQueryRequest h $ cqId callbackQuery
     findOpenMenuOrExit = do
-      menus <- lift . readIORef $ hOpenMenus h
+      menus <- stOpenMenus <$> (lift . readIORef $ hState h)
       maybe exitWithNoOpenMenu pure $ IntMap.lookup menuKey menus
     exitIfBadMessageId menu =
       when (cqMessageId callbackQuery /= omMessageId menu) $
@@ -193,8 +199,8 @@ openMenu h chatId title opts = do
   Logger.info h "Sending a message with menu"
   messageId <-
     sendMessageWithInlineKeyboard h chatId title [zip callbackDataList labels]
-  modifyIORef' (hOpenMenus h) $
-    IntMap.insert (unChatId chatId) (makeMenu messageId)
+  modifyIORef' (hState h) $
+    State . IntMap.insert (unChatId chatId) (makeMenu messageId) . stOpenMenus
   where
     callbackDataList = map (CallbackData . T.pack . show) ([0 ..] :: [Int])
     labels = map (T.pack . show . fst) opts
@@ -209,12 +215,12 @@ openMenu h chatId title opts = do
 -- table.
 closeMenuWithReplacementText :: Handle -> ChatId -> Text -> IO ()
 closeMenuWithReplacementText h chatId replacementText = do
-  menus <- readIORef $ hOpenMenus h
+  menus <- stOpenMenus <$> readIORef (hState h)
   let (maybeMenu, menus') =
         IntMap.updateLookupWithKey (\_ _ -> Nothing) menuKey menus
   whenJust maybeMenu $ \menu -> do
     Logger.info h $ "Closing menu with replacement text: " <> replacementText
-    writeIORef (hOpenMenus h) menus'
+    writeIORef (hState h) $ State menus'
     deleteMenuFromChat menu
   where
     menuKey = unChatId chatId
