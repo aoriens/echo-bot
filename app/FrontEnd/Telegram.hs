@@ -9,11 +9,11 @@ module FrontEnd.Telegram
 
 import Control.Arrow
 import qualified Data.ByteString.Lazy as BS
+import Data.IORef
 import Data.Maybe
 import Data.String
 import qualified EchoBot
-import FrontEnd.Telegram.Core hiding (new)
-import qualified FrontEnd.Telegram.Core as Core
+import FrontEnd.Telegram.Core
 import qualified Logger
 import qualified Network.HTTP.Client as HTTP
 import qualified Network.HTTP.Client.TLS as TLS
@@ -22,7 +22,15 @@ import qualified Network.URI as URI
 new :: EchoBot.Handle IO -> Logger.Handle IO -> Config -> IO Handle
 new botHandle logHandle config = do
   httpManager <- HTTP.newManager TLS.tlsManagerSettings
-  Core.new botHandle logHandle (getHttpResponse httpManager) config
+  state <- newIORef makeState
+  pure
+    Handle
+      { hBotHandle = botHandle
+      , hLogHandle = logHandle
+      , hGetHttpResponse = getHttpResponse httpManager
+      , hState = state
+      , hConfig = config
+      }
 
 getHttpResponse :: HTTP.Manager -> HttpRequest -> IO BS.ByteString
 getHttpResponse httpManager request = do

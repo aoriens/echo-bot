@@ -5,9 +5,9 @@
 -- messenger protocol. It is to be isolated from concrete libraries
 -- and I/O yet in order to be tested.
 module FrontEnd.Telegram.Core
-  ( new
+  ( makeState
   , run
-  , Handle
+  , Handle(..)
   , State
   , Config(..)
   , HttpRequest(..)
@@ -90,22 +90,8 @@ data HttpRequest =
 data HttpMethod =
   POST
 
-new ::
-     EchoBot.Handle IO
-  -> Logger.Handle IO
-  -> (HttpRequest -> IO BS.ByteString)
-  -> Config
-  -> IO Handle
-new botHandle logHandle getHttpResponse config = do
-  state <- newIORef $ State mempty
-  pure
-    Handle
-      { hBotHandle = botHandle
-      , hLogHandle = logHandle
-      , hGetHttpResponse = getHttpResponse
-      , hState = state
-      , hConfig = config
-      }
+makeState :: State
+makeState = State mempty
 
 run :: Handle -> IO ()
 run h = do
