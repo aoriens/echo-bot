@@ -1,11 +1,17 @@
 {-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving,
-  MultiParamTypeClasses #-}
+  MultiParamTypeClasses, FlexibleInstances #-}
 
+-- | The module connects the bot business logic and the Telegram
+-- messenger protocol. It is to be isolated from concrete libraries
+-- and I/O yet in order to be tested.
 module FrontEnd.Telegram
-  ( new
+  ( makeState
   , run
-  , Handle
+  , Handle(..)
+  , State
   , Config(..)
+  , HttpRequest(..)
+  , HttpMethod(..)
   ) where
 
 import Control.Applicative
@@ -16,7 +22,7 @@ import Control.Monad.Trans.Maybe
 import qualified Data.Aeson as A
 import Data.Aeson ((.:), (.=))
 import qualified Data.Aeson.Types as A
-import Data.IORef
+import qualified Data.ByteString.Lazy as BS
 import qualified Data.IntMap.Lazy as IntMap
 import Data.IntMap.Lazy (IntMap)
 import Data.Maybe
@@ -25,18 +31,15 @@ import qualified Data.Text as T
 import qualified EchoBot
 import qualified Logger
 import Logger ((.<))
-import qualified Network.HTTP.Client as HTTP
-import qualified Network.HTTP.Client.TLS as TLS
-import qualified Network.URI as URI
 
 data Config =
   Config
     -- | API token to authorize the Telegram bot. It is to be
     -- registered using Telegram documentation and kept in secret.
     { confApiToken :: Text
-    -- | API URL prefix, e.g. https://api.telegram.com/ . A trailing
-    -- slash is optional and acceptable.
-    , confURLPrefix :: Text
+    -- | API URL prefix, e.g. https://api.telegram.com . It is not
+    -- assumed to have a trailing slash.
+    , confURLPrefixWithoutTrailingSlash :: String
     -- | Poll timeout in seconds. The telegram server will wait that
     -- much before returning an empty list of events. A good value is
     -- large: it reduces server load and clutter in debug logs. A
@@ -49,20 +52,21 @@ data Config =
     , confConnectionTimeout :: Int
     }
 
-data Handle =
+data Handle m =
   Handle
-    { hBotHandle :: EchoBot.Handle IO
-    , hLogHandle :: Logger.Handle IO
-    , hHttpManager :: HTTP.Manager
-    -- | Open menus keyed by ChatId. Each chat can have a dedicated
-    -- open menu.
-    , hOpenMenus :: IORef (IntMap OpenMenu)
-    -- Fields copied from Config and optionally cleaned up or
-    -- canonicalized
-    , hApiToken :: Text
-    , hURLPrefixWithoutTrailingSlash :: String
-    , hPollTimeout :: Int
-    , hConnectionTimeout :: Int
+    { hBotHandle :: EchoBot.Handle m
+    , hLogHandle :: Logger.Handle m
+    , hGetHttpResponse :: HttpRequest -> m BS.ByteString
+    , hGetState :: m State
+    , hModifyState' :: (State -> State) -> m ()
+    , hConfig :: Config
+    }
+
+newtype State =
+  State
+      -- | Open menus keyed by ChatId. Each chat can have a dedicated
+      -- open menu.
+    { stOpenMenus :: IntMap OpenMenu
     }
 
 -- | Data to describe the currently open menu in a specific chat.
@@ -73,46 +77,43 @@ data OpenMenu =
     , omChoiceMap :: [(CallbackData, EchoBot.Event)]
     }
 
-new :: EchoBot.Handle IO -> Logger.Handle IO -> Config -> IO Handle
-new botHandle logHandle config = do
-  httpManager <- HTTP.newManager TLS.tlsManagerSettings
-  menus <- newIORef mempty
-  pure
-    Handle
-      { hBotHandle = botHandle
-      , hLogHandle = logHandle
-      , hHttpManager = httpManager
-      , hOpenMenus = menus
-      , hApiToken = confApiToken config
-      , hURLPrefixWithoutTrailingSlash =
-          T.unpack . T.dropWhileEnd (== '/') $ confURLPrefix config
-      , hPollTimeout = confPollTimeout config
-      , hConnectionTimeout = confConnectionTimeout config
-      }
+-- | HTTP request value, independent of specific libraries.
+data HttpRequest =
+  HttpRequest
+    { hrMethod :: HttpMethod
+    , hrURI :: String
+    , hrHeaders :: [(String, String)]
+    , hrBody :: BS.ByteString
+    , hrResponseTimeout :: Int
+    }
 
-run :: Handle -> IO ()
-run h = do
-  nextUpdateIdRef <- newIORef $ UpdateId 0
-  forever $ do
-    nextUpdateId <- readIORef nextUpdateIdRef
-    (lastId, events) <- receiveEvents h nextUpdateId
-    forM_ events $ handleEvent h
-    whenJust lastId $ writeIORef nextUpdateIdRef . succ
+data HttpMethod =
+  POST
 
-receiveEvents :: Handle -> UpdateId -> IO (Maybe UpdateId, [Event])
+makeState :: State
+makeState = State mempty
+
+run :: Monad m => Handle m -> m ()
+run h = go $ UpdateId 0
+  where
+    go nextUpdateId = do
+      (lastId, events) <- receiveEvents h nextUpdateId
+      forM_ events $ handleEvent h
+      go $ maybe nextUpdateId succ lastId
+
+receiveEvents :: Monad m => Handle m -> UpdateId -> m (Maybe UpdateId, [Event])
 receiveEvents h nextUpdateId = do
   getResponseWithMethodAndRequestModifier
     h
     (ApiMethod "getUpdates")
     (A.object ["offset" .= nextUpdateId, "timeout" .= pollTimeout])
-    (\httpRequest -> httpRequest {HTTP.responseTimeout = httpTimeout})
+    (\request ->
+       request {hrResponseTimeout = hrResponseTimeout request + pollTimeout})
     parseUpdatesResponse
   where
-    pollTimeout = hPollTimeout h
-    connectionTimeout = pollTimeout + hConnectionTimeout h
-    httpTimeout = HTTP.responseTimeoutMicro $ 1000000 * connectionTimeout
+    pollTimeout = confPollTimeout $ hConfig h
 
-handleEvent :: Handle -> Event -> IO ()
+handleEvent :: Monad m => Handle m -> Event -> m ()
 handleEvent h (MessageEvent message) =
   sendRequestToBotAndHandleOutput
     h
@@ -134,7 +135,7 @@ handleEvent h (MenuChoiceEvent callbackQuery) =
     confirmToServer =
       lift . sendAnswerCallbackQueryRequest h $ cqId callbackQuery
     findOpenMenuOrExit = do
-      menus <- lift . readIORef $ hOpenMenus h
+      menus <- stOpenMenus <$> lift (hGetState h)
       maybe exitWithNoOpenMenu pure $ IntMap.lookup menuKey menus
     exitIfBadMessageId menu =
       when (cqMessageId callbackQuery /= omMessageId menu) $
@@ -158,7 +159,8 @@ handleEvent h (MenuChoiceEvent callbackQuery) =
     menuKey = unChatId chatId
     chatId = cqChatId callbackQuery
 
-sendRequestToBotAndHandleOutput :: Handle -> ChatId -> EchoBot.Event -> IO ()
+sendRequestToBotAndHandleOutput ::
+     Monad m => Handle m -> ChatId -> EchoBot.Event -> m ()
 sendRequestToBotAndHandleOutput h chatId request = do
   response <- EchoBot.respond (hBotHandle h) request
   case response of
@@ -168,14 +170,15 @@ sendRequestToBotAndHandleOutput h chatId request = do
 
 -- | Sends a menu with repetition count options. Currently no other
 -- menus are implemented.
-openMenu :: Handle -> ChatId -> Text -> [(Int, EchoBot.Event)] -> IO ()
+openMenu ::
+     Monad m => Handle m -> ChatId -> Text -> [(Int, EchoBot.Event)] -> m ()
 openMenu h chatId title opts = do
   closeMenuWithReplacementText h chatId "The menu is now out-of-date"
   Logger.info h "Sending a message with menu"
   messageId <-
     sendMessageWithInlineKeyboard h chatId title [zip callbackDataList labels]
-  modifyIORef' (hOpenMenus h) $
-    IntMap.insert (unChatId chatId) (makeMenu messageId)
+  hModifyState' h $
+    State . IntMap.insert (unChatId chatId) (makeMenu messageId) . stOpenMenus
   where
     callbackDataList = map (CallbackData . T.pack . show) ([0 ..] :: [Int])
     labels = map (T.pack . show . fst) opts
@@ -188,14 +191,14 @@ openMenu h chatId title opts = do
 
 -- | Safely deletes menu both from the chat and from the pending menu
 -- table.
-closeMenuWithReplacementText :: Handle -> ChatId -> Text -> IO ()
+closeMenuWithReplacementText :: Monad m => Handle m -> ChatId -> Text -> m ()
 closeMenuWithReplacementText h chatId replacementText = do
-  menus <- readIORef $ hOpenMenus h
+  menus <- stOpenMenus <$> hGetState h
   let (maybeMenu, menus') =
         IntMap.updateLookupWithKey (\_ _ -> Nothing) menuKey menus
   whenJust maybeMenu $ \menu -> do
     Logger.info h $ "Closing menu with replacement text: " <> replacementText
-    writeIORef (hOpenMenus h) menus'
+    hModifyState' h $ const (State menus')
     deleteMenuFromChat menu
   where
     menuKey = unChatId chatId
@@ -207,7 +210,7 @@ closeMenuWithReplacementText h chatId replacementText = do
         (makeEditedTitle menu)
     makeEditedTitle menu = omTitle menu <> "\n(" <> replacementText <> ")"
 
-sendMessage :: Handle -> ChatId -> Text -> IO ()
+sendMessage :: Monad m => Handle m -> ChatId -> Text -> m ()
 sendMessage h chatId text = do
   executeMethod
     h
@@ -215,7 +218,12 @@ sendMessage h chatId text = do
     (A.object ["chat_id" .= chatId, "text" .= text])
 
 sendMessageWithInlineKeyboard ::
-     Handle -> ChatId -> Text -> [[(CallbackData, Text)]] -> IO MessageId
+     Monad m
+  => Handle m
+  -> ChatId
+  -> Text
+  -> [[(CallbackData, Text)]]
+  -> m MessageId
 sendMessageWithInlineKeyboard h chatId title opts =
   getResponseWithMethod h (ApiMethod "sendMessage") request parseMessageId
   where
@@ -233,14 +241,15 @@ sendMessageWithInlineKeyboard h chatId title opts =
         message <- r .: "result"
         message .: "message_id"
 
-sendAnswerCallbackQueryRequest :: Handle -> CallbackQueryId -> IO ()
+sendAnswerCallbackQueryRequest :: Monad m => Handle m -> CallbackQueryId -> m ()
 sendAnswerCallbackQueryRequest h queryId =
   executeMethod
     h
     (ApiMethod "answerCallbackQuery")
     (A.object ["callback_query_id" .= queryId])
 
-sendEditMessageTextRequest :: Handle -> ChatId -> MessageId -> Text -> IO ()
+sendEditMessageTextRequest ::
+     Monad m => Handle m -> ChatId -> MessageId -> Text -> m ()
 sendEditMessageTextRequest h chatId messageId text =
   executeMethod
     h
@@ -248,66 +257,60 @@ sendEditMessageTextRequest h chatId messageId text =
     (A.object ["chat_id" .= chatId, "message_id" .= messageId, "text" .= text])
 
 getResponseWithMethod ::
-     (A.ToJSON request)
-  => Handle
+     (A.ToJSON request, Monad m)
+  => Handle m
   -> ApiMethod
   -> request
   -> (A.Value -> A.Parser response)
-  -> IO response
+  -> m response
 getResponseWithMethod h method request =
   getResponseWithMethodAndRequestModifier h method request id
 
 getResponseWithMethodAndRequestModifier ::
-     (A.ToJSON request)
-  => Handle
+     (A.ToJSON request, Monad m)
+  => Handle m
   -> ApiMethod
   -> request
-  -> (HTTP.Request -> HTTP.Request)
+  -> (HttpRequest -> HttpRequest)
   -> (A.Value -> A.Parser response)
-  -> IO response
+  -> m response
 getResponseWithMethodAndRequestModifier h method request httpRequestModifier parser = do
   Logger.debug h $ "Send " .< method <> ": " .< A.encode request
-  response <- getResponse
-  Logger.debug h $ "Responded with " .< HTTP.responseBody response
+  response <- hGetHttpResponse h httpRequest
+  Logger.debug h $ "Responded with " .< response
   result <- getResult response
   logResult result
   pure $ either error id result
   where
-    getResponse = do
-      httpRequest <- getRequest
-      HTTP.httpLbs httpRequest $ hHttpManager h
-    getRequest = do
-      httpRequest <- HTTP.requestFromURI $ endpointURI h method
-      pure . httpRequestModifier $
-        httpRequest
-          { HTTP.checkResponse = HTTP.throwErrorStatusCodes
-          , HTTP.method = "POST"
-          , HTTP.requestHeaders = [("Content-Type", "application/json")]
-          , HTTP.requestBody = HTTP.RequestBodyLBS $ A.encode request
-          , HTTP.responseTimeout = defaultHttpTimeout
+    httpRequest =
+      httpRequestModifier
+        HttpRequest
+          { hrMethod = POST
+          , hrURI = endpointURI h method
+          , hrHeaders = [("Content-Type", "application/json")]
+          , hrBody = A.encode request
+          , hrResponseTimeout = confConnectionTimeout $ hConfig h
           }
-    defaultHttpTimeout =
-      HTTP.responseTimeoutMicro . (1000000 *) $ hConnectionTimeout h
     getResult response =
       pure $ do
-        value <- A.eitherDecode (HTTP.responseBody response)
+        value <- A.eitherDecode response
         A.parseEither parser value
     logResult (Left e) = Logger.error h $ "Response error: " <> T.pack e
     logResult _ = pure ()
 
-executeMethod :: (A.ToJSON request) => Handle -> ApiMethod -> request -> IO ()
+executeMethod ::
+     (A.ToJSON request, Monad m) => Handle m -> ApiMethod -> request -> m ()
 executeMethod h method request =
   getResponseWithMethod h method request (const $ pure ())
 
-endpointURI :: Handle -> ApiMethod -> URI.URI
+endpointURI :: Handle m -> ApiMethod -> String
 endpointURI h (ApiMethod method) =
-  fromMaybe (error $ "Bad URI: " ++ uri) . URI.parseURI $ uri
+  urlPrefix ++ "/bot" ++ apiToken ++ "/" ++ method
   where
-    uri =
-      hURLPrefixWithoutTrailingSlash h ++ "/bot" ++ apiToken ++ "/" ++ method
-    apiToken = T.unpack $ hApiToken h
+    urlPrefix = confURLPrefixWithoutTrailingSlash (hConfig h)
+    apiToken = T.unpack . confApiToken $ hConfig h
 
-instance Logger.Logger Handle IO where
+instance Logger.Logger (Handle m) m where
   lowLevelLog = Logger.lowLevelLog . hLogHandle
 
 parseUpdatesResponse :: A.Value -> A.Parser (Maybe UpdateId, [Event])

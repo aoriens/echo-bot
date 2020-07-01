@@ -56,10 +56,13 @@ getTelegramConfig =
     pure
       FrontEnd.Telegram.Config
         { FrontEnd.Telegram.confApiToken = apiToken
-        , FrontEnd.Telegram.confURLPrefix = urlPrefix
+        , FrontEnd.Telegram.confURLPrefixWithoutTrailingSlash =
+            T.unpack $ unslash urlPrefix
         , FrontEnd.Telegram.confPollTimeout = pollTimeout
         , FrontEnd.Telegram.confConnectionTimeout = connectionTimeout
         }
+  where
+    unslash = T.dropWhileEnd (== '/')
 
 getFrontEndConfig :: IO Main.FrontEnd
 getFrontEndConfig =

@@ -23,6 +23,9 @@ dependencies:
 - text
 - mtl
 - transformers
+- aeson
+- containers
+- bytestring
 
 library:
   source-dirs: src
@@ -42,9 +45,7 @@ executables:
     - http-client
     - http-client-tls
     - network-uri
-    - aeson
     - time
-    - containers
 
 tests:
   echo-bot-test:
