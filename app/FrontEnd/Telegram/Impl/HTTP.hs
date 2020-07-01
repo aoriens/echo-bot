@@ -15,6 +15,7 @@ import qualified Logger
 import qualified Network.HTTP.Client as HTTP
 import qualified Network.HTTP.Client.TLS as TLS
 import qualified Network.URI as URI
+import qualified Util.FlexibleState as FlexibleState
 
 new :: EchoBot.Handle IO -> Logger.Handle IO -> Config -> IO (Handle IO)
 new botHandle logHandle config = do
@@ -25,8 +26,11 @@ new botHandle logHandle config = do
       { hBotHandle = botHandle
       , hLogHandle = logHandle
       , hGetHttpResponse = getHttpResponse httpManager
-      , hGetState = readIORef stateRef
-      , hModifyState' = modifyIORef' stateRef
+      , hStateHandle =
+          FlexibleState.Handle
+            { FlexibleState.hGet = readIORef stateRef
+            , FlexibleState.hModify' = modifyIORef' stateRef
+            }
       , hConfig = config
       }
 

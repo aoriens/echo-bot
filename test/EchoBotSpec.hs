@@ -14,6 +14,7 @@ import Test.Hspec
 import Test.Hspec.QuickCheck
 import Test.QuickCheck
 import Test.QuickCheck.Monadic
+import qualified Util.FlexibleState as FS
 
 type Interp = WriterT [(Logger.Level, T.Text)] (S.StateT State IO)
 
@@ -131,8 +132,7 @@ runBot s0 m = do
 handleWith :: Config -> Handle Interp
 handleWith config =
   Handle
-    { hGetState = S.get
-    , hModifyState = S.modify'
+    { hStateHandle = FS.Handle {FS.hGet = S.get, FS.hModify' = S.modify'}
     , hLogHandle = logHandle
     , hConfig = config
     }

@@ -14,6 +14,7 @@ import qualified FrontEnd.Telegram.Impl.HTTP
 import qualified Logger
 import qualified Logger.Impl
 import Main.ConfigurationTypes
+import qualified Util.FlexibleState as FlexibleState
 
 main :: IO ()
 main = do
@@ -45,8 +46,11 @@ getBotHandle logHandle = do
   botState <- newIORef initialState
   pure
     EchoBot.Handle
-      { EchoBot.hGetState = readIORef botState
-      , EchoBot.hModifyState = modifyIORef' botState
+      { EchoBot.hStateHandle =
+          FlexibleState.Handle
+            { FlexibleState.hGet = readIORef botState
+            , FlexibleState.hModify' = modifyIORef' botState
+            }
       , EchoBot.hLogHandle = logHandle
       , EchoBot.hConfig = botConfig
       }

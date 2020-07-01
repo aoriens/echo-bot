@@ -18,12 +18,13 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Logger
 import Logger ((.<))
+import qualified Util.FlexibleState as FlexibleState
+import Util.FlexibleState (get, modify')
 
 -- | The bot dependencies to be satisfied by the caller.
 data Handle m =
   Handle
-    { hGetState :: m State
-    , hModifyState :: (State -> State) -> m ()
+    { hStateHandle :: FlexibleState.Handle State m
     , hLogHandle :: Logger.Handle m
     , hConfig :: Config
     }
@@ -104,7 +105,7 @@ handleSettingRepetitionCount h count = do
     Logger.warn h $
       "Suspicious new repetition count to be set, too little or large: " .<
       count
-  hModifyState h $ \s -> s {stRepetitionCount = count}
+  modify' (hStateHandle h) $ \s -> s {stRepetitionCount = count}
   pure EmptyResponse
 
 handleRepeatCommand :: (Monad m) => Handle m -> m Response
@@ -120,7 +121,7 @@ handleRepeatCommand h = do
 
 repeatCommandReply :: (Monad m) => Handle m -> m Text
 repeatCommandReply h = do
-  count <- stRepetitionCount <$> hGetState h
+  count <- stRepetitionCount <$> get (hStateHandle h)
   let countText = T.pack $ show count
       template = confRepeatReply $ hConfig h
   pure $ T.replace "{count}" countText template
@@ -133,7 +134,7 @@ maxRepetitionCount = 5
 respondWithEchoedComment :: (Monad m) => Handle m -> Text -> m Response
 respondWithEchoedComment h comment = do
   Logger.info h $ "Echoing user input: '" <> comment <> "'"
-  count <- stRepetitionCount <$> hGetState h
+  count <- stRepetitionCount <$> get (hStateHandle h)
   Logger.debug h $ "Current repetition count is " .< count
   pure . RepliesResponse . replicate count $ comment
 
@@ -151,3 +152,7 @@ startsWithWord word text =
 
 instance Logger.Logger (Handle m) m where
   lowLevelLog = Logger.lowLevelLog . hLogHandle
+
+instance Monad m => FlexibleState.Class (Handle m) State m where
+  get = FlexibleState.hGet . hStateHandle
+  modify' = FlexibleState.hModify' . hStateHandle

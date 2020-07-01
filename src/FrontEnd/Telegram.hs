@@ -31,6 +31,8 @@ import qualified Data.Text as T
 import qualified EchoBot
 import qualified Logger
 import Logger ((.<))
+import qualified Util.FlexibleState as FlexibleState
+import Util.FlexibleState (get, modify')
 
 data Config =
   Config
@@ -57,8 +59,7 @@ data Handle m =
     { hBotHandle :: EchoBot.Handle m
     , hLogHandle :: Logger.Handle m
     , hGetHttpResponse :: HttpRequest -> m BS.ByteString
-    , hGetState :: m State
-    , hModifyState' :: (State -> State) -> m ()
+    , hStateHandle :: FlexibleState.Handle State m
     , hConfig :: Config
     }
 
@@ -135,7 +136,7 @@ handleEvent h (MenuChoiceEvent callbackQuery) =
     confirmToServer =
       lift . sendAnswerCallbackQueryRequest h $ cqId callbackQuery
     findOpenMenuOrExit = do
-      menus <- stOpenMenus <$> lift (hGetState h)
+      menus <- stOpenMenus <$> lift (get h)
       maybe exitWithNoOpenMenu pure $ IntMap.lookup menuKey menus
     exitIfBadMessageId menu =
       when (cqMessageId callbackQuery /= omMessageId menu) $
@@ -177,7 +178,7 @@ openMenu h chatId title opts = do
   Logger.info h "Sending a message with menu"
   messageId <-
     sendMessageWithInlineKeyboard h chatId title [zip callbackDataList labels]
-  hModifyState' h $
+  modify' h $
     State . IntMap.insert (unChatId chatId) (makeMenu messageId) . stOpenMenus
   where
     callbackDataList = map (CallbackData . T.pack . show) ([0 ..] :: [Int])
@@ -193,12 +194,12 @@ openMenu h chatId title opts = do
 -- table.
 closeMenuWithReplacementText :: Monad m => Handle m -> ChatId -> Text -> m ()
 closeMenuWithReplacementText h chatId replacementText = do
-  menus <- stOpenMenus <$> hGetState h
+  menus <- stOpenMenus <$> get h
   let (maybeMenu, menus') =
         IntMap.updateLookupWithKey (\_ _ -> Nothing) menuKey menus
   whenJust maybeMenu $ \menu -> do
     Logger.info h $ "Closing menu with replacement text: " <> replacementText
-    hModifyState' h $ const (State menus')
+    modify' h $ const (State menus')
     deleteMenuFromChat menu
   where
     menuKey = unChatId chatId
@@ -312,6 +313,10 @@ endpointURI h (ApiMethod method) =
 
 instance Logger.Logger (Handle m) m where
   lowLevelLog = Logger.lowLevelLog . hLogHandle
+
+instance Monad m => FlexibleState.Class (Handle m) State m where
+  get = FlexibleState.hGet . hStateHandle
+  modify' = FlexibleState.hModify' . hStateHandle
 
 parseUpdatesResponse :: A.Value -> A.Parser (Maybe UpdateId, [Event])
 parseUpdatesResponse =
