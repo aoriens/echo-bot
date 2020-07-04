@@ -87,9 +87,11 @@ data HttpRequest =
     , hrBody :: BS.ByteString
     , hrResponseTimeout :: Int
     }
+  deriving (Show)
 
 data HttpMethod =
   POST
+  deriving (Show)
 
 makeState :: State
 makeState = State mempty
