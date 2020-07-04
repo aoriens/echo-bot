@@ -37,8 +37,9 @@ spec =
           body = decodeJsonObject $ T.hrBody request
       HM.lookupDefault zero "offset" body `shouldBe` zero
     it
-      "should have getUpdates with offset one more than last update_id received" $
-      property $ \id1 id2 -> do
+      "should have getUpdates with offset one more than maximum of last \
+      \update_id's received" $
+      property $ \(NonNegative id1) (NonNegative id2) -> do
         let _ = (id1 :: Int, id2 :: Int)
             h =
               defaultHandleWithHttpHandlers
@@ -50,7 +51,7 @@ spec =
                 ]
             (_:request:_) = requestsWithMethod "getUpdates" . interp $ T.run h
             body = decodeJsonObject $ T.hrBody request
-        body ! "offset" `shouldBe` A.toJSON (id2 + 1)
+        body ! "offset" `shouldBe` A.toJSON (max id1 id2 + 1)
 
 -- * Stubs
 defaultHandle :: T.Handle Interp
