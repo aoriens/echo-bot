@@ -4,26 +4,35 @@ module FrontEnd.TelegramSpec
   ( spec
   ) where
 
-import qualified FrontEnd.Telegram as T
-import Data.Maybe
-import Test.Hspec
-import qualified Logger
 import Control.Monad.Writer.Lazy
+import qualified Data.Aeson as A
+import qualified Data.ByteString.Lazy as BS
+import Data.HashMap.Strict ((!))
+import Data.Maybe
 import qualified Data.Text as T
-import Data.ByteString.Lazy as BS
+import qualified FrontEnd.Telegram as T
+import qualified Logger
+import Test.Hspec
+import Test.Hspec.QuickCheck
+import Test.QuickCheck
 
 spec :: Spec
 spec =
   describe "FrontEnd.Telegram" $ do
     it "should send getUpdates as the first request" $ do
-      let h = makeHandle
-      let (r:_) = onlyRequests . interp $ T.run h 
-      T.hrURI r `shouldBe` uriWithMethod "getUpdates"
+      let (request:_) = onlyRequests . interp $ T.run defaultHandle
+      T.hrURI request `shouldBe` uriWithMethod "getUpdates"
+    prop "should send configured timeout in getUpdates" $ \(NonNegative timeout) -> do
+      let h =
+            defaultHandle
+              {T.hConfig = defaultConfig {T.confPollTimeout = timeout}}
+          (request:_) = onlyRequests . interp $ T.run h
+          body = decodeJsonObject $ T.hrBody request
+      body ! "timeout" `shouldBe` A.toJSON timeout
 
 -- * Stubs
-
-makeHandle :: T.Handle Interp
-makeHandle =
+defaultHandle :: T.Handle Interp
+defaultHandle =
   T.Handle
     { T.hBotHandle = error "TODO: no bot handle should be needed"
     , T.hLogHandle = logHandle
@@ -45,7 +54,8 @@ logHandle :: Logger.Handle Interp
 logHandle =
   Logger.Handle
     { Logger.hLowLevelLog =
-        \level _ text -> when (level >= Logger.Warning) $ tell [LogEvent level text]
+        \level _ text ->
+          when (level >= Logger.Warning) $ tell [LogEvent level text]
     }
 
 uriWithMethod :: String -> String
@@ -55,8 +65,10 @@ uriWithMethod method = host ++ "/bot" ++ apiToken ++ "/" ++ method
     apiToken = T.unpack $ T.confApiToken config
     config = defaultConfig
 
--- * The interpreter monad
+decodeJsonObject :: BS.ByteString -> A.Object
+decodeJsonObject bs = either error id $ A.eitherDecode bs
 
+-- * The interpreter monad
 type Interp = Writer [Event]
 
 data Event
