@@ -8,6 +8,7 @@ import Control.Monad.Writer.Lazy
 import qualified Data.Aeson as A
 import qualified Data.ByteString.Lazy as BS
 import Data.HashMap.Strict ((!))
+import qualified Data.HashMap.Strict as HM
 import Data.Maybe
 import qualified Data.Text as T
 import qualified FrontEnd.Telegram as T
@@ -29,6 +30,11 @@ spec =
           (request:_) = onlyRequests . interp $ T.run h
           body = decodeJsonObject $ T.hrBody request
       body ! "timeout" `shouldBe` A.toJSON timeout
+    it "should have first getUpdates request with zero offset or no offset" $ do
+      let zero = A.toJSON (0 :: Int)
+          (request:_) = onlyRequests . interp $ T.run defaultHandle
+          body = decodeJsonObject $ T.hrBody request
+      HM.lookupDefault zero "offset" body `shouldBe` zero
 
 -- * Stubs
 defaultHandle :: T.Handle Interp
