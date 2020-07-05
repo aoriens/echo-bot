@@ -28,13 +28,11 @@ spec =
       let h =
             defaultHandle
               {T.hConfig = defaultConfig {T.confPollTimeout = timeout}}
-          (request:_) = onlyRequests . interp $ T.run h
-          body = decodeJsonObject $ T.hrBody request
+          (body:_) = bodies . onlyRequests . interp $ T.run h
       body ! "timeout" `shouldBe` A.toJSON timeout
     it "should have first getUpdates request with zero offset or no offset" $ do
       let zero = A.toJSON (0 :: Int)
-          (request:_) = onlyRequests . interp $ T.run defaultHandle
-          body = decodeJsonObject $ T.hrBody request
+          (body:_) = bodies . onlyRequests . interp $ T.run defaultHandle
       HM.lookupDefault zero "offset" body `shouldBe` zero
     it
       "should have getUpdates with offset one more than maximum of last \
@@ -49,8 +47,8 @@ spec =
                     , A.object ["update_id" .= id2]
                     ]
                 ]
-            (_:request:_) = requestsWithMethod "getUpdates" . interp $ T.run h
-            body = decodeJsonObject $ T.hrBody request
+            (_:body:_) =
+              bodies . requestsWithMethod "getUpdates" . interp $ T.run h
         body ! "offset" `shouldBe` A.toJSON (max id1 id2 + 1)
 
 -- * Stubs
@@ -98,6 +96,9 @@ uriWithMethod method =
 
 decodeJsonObject :: BS.ByteString -> A.Object
 decodeJsonObject bs = either error id $ A.eitherDecode bs
+
+bodies :: [T.HttpRequest] -> [A.Object]
+bodies = map $ decodeJsonObject . T.hrBody
 
 successfulResponse :: (A.ToJSON a) => a -> A.Value
 successfulResponse payload = A.object ["result" .= payload]
