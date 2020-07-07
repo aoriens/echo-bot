@@ -73,6 +73,7 @@ test-suite echo-bot-test
   main-is: Spec.hs
   other-modules:
       EchoBotSpec
+      FrontEnd.TelegramSpec
       Paths_echo_bot
   hs-source-dirs:
       test
@@ -88,4 +89,5 @@ test-suite echo-bot-test
     , mtl
     , text
     , transformers
+    , unordered-containers
   default-language: Haskell2010

@@ -26,6 +26,7 @@ import qualified Data.ByteString.Lazy as BS
 import qualified Data.IntMap.Lazy as IntMap
 import Data.IntMap.Lazy (IntMap)
 import Data.Maybe
+import Data.Semigroup
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified EchoBot
@@ -87,9 +88,11 @@ data HttpRequest =
     , hrBody :: BS.ByteString
     , hrResponseTimeout :: Int
     }
+  deriving (Show)
 
 data HttpMethod =
   POST
+  deriving (Show)
 
 makeState :: State
 makeState = State mempty
@@ -322,9 +325,9 @@ parseUpdatesResponse :: A.Value -> A.Parser (Maybe UpdateId, [Event])
 parseUpdatesResponse =
   A.withObject "response" $ \r -> do
     updates <- r .: "result"
-    (listToMaybe . reverse *** catMaybes) . unzip <$>
-      traverse parseUpdate updates
+    (safeMaximum *** catMaybes) . unzip <$> traverse parseUpdate updates
   where
+    safeMaximum = fmap getMax . foldMap (Just . Max)
     parseUpdate =
       A.withObject "update" $ \update ->
         liftA2 (,) (update .: "update_id") (optional $ parseEvent update)
@@ -386,7 +389,7 @@ newtype ChatId =
 
 newtype UpdateId =
   UpdateId Int
-  deriving (A.FromJSON, A.ToJSON, Enum, Show)
+  deriving (A.FromJSON, A.ToJSON, Enum, Show, Eq, Ord)
 
 newtype MessageId =
   MessageId Int
