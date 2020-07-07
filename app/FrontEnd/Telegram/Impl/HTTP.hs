@@ -10,31 +10,31 @@ import Data.IORef
 import Data.Maybe
 import Data.String
 import qualified EchoBot
-import FrontEnd.Telegram
+import qualified FrontEnd.Telegram as T
 import qualified Logger
 import qualified Network.HTTP.Client as HTTP
 import qualified Network.HTTP.Client.TLS as TLS
 import qualified Network.URI as URI
 import qualified Util.FlexibleState as FlexibleState
 
-new :: EchoBot.Handle IO -> Logger.Handle IO -> Config -> IO (Handle IO)
+new :: EchoBot.Handle IO -> Logger.Handle IO -> T.Config -> IO (T.Handle IO)
 new botHandle logHandle config = do
   httpManager <- HTTP.newManager TLS.tlsManagerSettings
-  stateRef <- newIORef makeState
+  stateRef <- newIORef T.makeState
   pure
-    Handle
-      { hBotHandle = botHandle
-      , hLogHandle = logHandle
-      , hGetHttpResponse = getHttpResponse httpManager
-      , hStateHandle =
+    T.Handle
+      { T.hBotHandle = botHandle
+      , T.hLogHandle = logHandle
+      , T.hGetHttpResponse = getHttpResponse httpManager
+      , T.hStateHandle =
           FlexibleState.Handle
             { FlexibleState.hGet = readIORef stateRef
             , FlexibleState.hModify' = modifyIORef' stateRef
             }
-      , hConfig = config
+      , T.hConfig = config
       }
 
-getHttpResponse :: HTTP.Manager -> HttpRequest -> IO BS.ByteString
+getHttpResponse :: HTTP.Manager -> T.HttpRequest -> IO BS.ByteString
 getHttpResponse httpManager request = do
   httpRequest <- configureRequest <$> HTTP.requestFromURI uri
   HTTP.responseBody <$> HTTP.httpLbs httpRequest httpManager
@@ -42,14 +42,15 @@ getHttpResponse httpManager request = do
     configureRequest httpRequest =
       httpRequest
         { HTTP.checkResponse = HTTP.throwErrorStatusCodes
-        , HTTP.method = methodString $ hrMethod request
+        , HTTP.method = methodString $ T.hrMethod request
         , HTTP.requestHeaders =
-            map (fromString *** fromString) $ hrHeaders request
-        , HTTP.requestBody = HTTP.RequestBodyLBS $ hrBody request
+            map (fromString *** fromString) $ T.hrHeaders request
+        , HTTP.requestBody = HTTP.RequestBodyLBS $ T.hrBody request
         , HTTP.responseTimeout =
-            HTTP.responseTimeoutMicro . (1000000 *) $ hrResponseTimeout request
+            HTTP.responseTimeoutMicro . (1000000 *) $
+            T.hrResponseTimeout request
         }
     uri =
       fromMaybe (error $ "Bad URI: " ++ uriString) . URI.parseURI $ uriString
-    uriString = hrURI request
-    methodString POST = "POST"
+    uriString = T.hrURI request
+    methodString T.POST = "POST"
