@@ -1,7 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module FrontEnd.Telegram.Impl.HTTP
-  ( new
+  ( Config(..)
+  , new
   ) where
 
 import Control.Arrow
@@ -17,25 +18,37 @@ import qualified Network.HTTP.Client.TLS as TLS
 import qualified Network.URI as URI
 import qualified Util.FlexibleState as FlexibleState
 
-new :: EchoBot.Handle IO -> Logger.Handle IO -> T.Config -> IO (T.Handle IO)
-new botHandle logHandle config = do
+newtype Config =
+  Config
+    -- | A default, minimum response timeout for all requests.
+    { confResponseTimeout :: Int
+    }
+
+-- | Creates a @FrontEnd.Telegram.Handle@ using http-client.
+new ::
+     EchoBot.Handle IO
+  -> Logger.Handle IO
+  -> Config
+  -> T.Config
+  -> IO (T.Handle IO)
+new botHandle logHandle myConfig telegramConfig = do
   httpManager <- HTTP.newManager TLS.tlsManagerSettings
   stateRef <- newIORef T.makeState
   pure
     T.Handle
       { T.hBotHandle = botHandle
       , T.hLogHandle = logHandle
-      , T.hGetHttpResponse = getHttpResponse httpManager
+      , T.hGetHttpResponse = getHttpResponse httpManager myConfig
       , T.hStateHandle =
           FlexibleState.Handle
             { FlexibleState.hGet = readIORef stateRef
             , FlexibleState.hModify' = modifyIORef' stateRef
             }
-      , T.hConfig = config
+      , T.hConfig = telegramConfig
       }
 
-getHttpResponse :: HTTP.Manager -> T.HttpRequest -> IO BS.ByteString
-getHttpResponse httpManager request = do
+getHttpResponse :: HTTP.Manager -> Config -> T.HttpRequest -> IO BS.ByteString
+getHttpResponse httpManager config request = do
   httpRequest <- configureRequest <$> HTTP.requestFromURI uri
   HTTP.responseBody <$> HTTP.httpLbs httpRequest httpManager
   where
@@ -48,7 +61,7 @@ getHttpResponse httpManager request = do
         , HTTP.requestBody = HTTP.RequestBodyLBS $ T.hrBody request
         , HTTP.responseTimeout =
             HTTP.responseTimeoutMicro . (1000000 *) $
-            T.hrResponseTimeout request
+            T.hrAdditionalResponseTimeout request + confResponseTimeout config
         }
     uri =
       fromMaybe (error $ "Bad URI: " ++ uriString) . URI.parseURI $ uriString

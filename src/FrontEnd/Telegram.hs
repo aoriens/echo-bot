@@ -48,11 +48,6 @@ data Config =
     -- large: it reduces server load and clutter in debug logs. A
     -- smaller value (e.g. zero) is convenient for debugging.
     , confPollTimeout :: Int
-    -- | Connection timeout in seconds. It is considered an error when
-    -- no response headers are accepted in this period. An obvious
-    -- exception is the poll request: its connection timeout is
-    -- confPollTimeout seconds more.
-    , confConnectionTimeout :: Int
     }
 
 data Handle m =
@@ -86,7 +81,9 @@ data HttpRequest =
     , hrURI :: String
     , hrHeaders :: [(String, String)]
     , hrBody :: BS.ByteString
-    , hrResponseTimeout :: Int
+    -- | A number of seconds to add to the default response timeout.
+    -- This is important if the request is expected to wait much time.
+    , hrAdditionalResponseTimeout :: Int
     }
   deriving (Show)
 
@@ -112,7 +109,10 @@ receiveEvents h nextUpdateId = do
     (ApiMethod "getUpdates")
     (A.object ["offset" .= nextUpdateId, "timeout" .= pollTimeout])
     (\request ->
-       request {hrResponseTimeout = hrResponseTimeout request + pollTimeout})
+       request
+         { hrAdditionalResponseTimeout =
+             hrAdditionalResponseTimeout request + pollTimeout
+         })
     parseUpdatesResponse
   where
     pollTimeout = confPollTimeout $ hConfig h
@@ -293,7 +293,7 @@ getResponseWithMethodAndRequestModifier h method request httpRequestModifier par
           , hrURI = endpointURI h method
           , hrHeaders = [("Content-Type", "application/json")]
           , hrBody = A.encode request
-          , hrResponseTimeout = confConnectionTimeout $ hConfig h
+          , hrAdditionalResponseTimeout = 0
           }
     getResult response =
       pure $ do

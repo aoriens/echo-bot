@@ -73,7 +73,6 @@ defaultConfig =
     { T.confApiToken = T.pack defaultApiToken
     , T.confURLPrefixWithoutTrailingSlash = defaultURLPrefix
     , T.confPollTimeout = 123
-    , T.confConnectionTimeout = 456
     }
 
 defaultApiToken :: String
