@@ -33,7 +33,7 @@ import qualified EchoBot
 import qualified Logger
 import Logger ((.<))
 import qualified Util.FlexibleState as FlexibleState
-import Util.FlexibleState (get, modify')
+import Util.FlexibleState (gets, modify')
 
 data Config =
   Config
@@ -139,7 +139,7 @@ handleEvent h (MenuChoiceEvent callbackQuery) =
     confirmToServer =
       lift . sendAnswerCallbackQueryRequest h $ cqId callbackQuery
     findOpenMenuOrExit = do
-      menus <- stOpenMenus <$> lift (get h)
+      menus <- lift $ gets h stOpenMenus
       maybe exitWithNoOpenMenu pure $ IntMap.lookup menuKey menus
     exitIfBadMessageId menu =
       when (cqMessageId callbackQuery /= omMessageId menu) $
@@ -197,7 +197,7 @@ openMenu h chatId title opts = do
 -- table.
 closeMenuWithReplacementText :: Monad m => Handle m -> ChatId -> Text -> m ()
 closeMenuWithReplacementText h chatId replacementText = do
-  menus <- stOpenMenus <$> get h
+  menus <- gets h stOpenMenus
   let (maybeMenu, menus') =
         IntMap.updateLookupWithKey (\_ _ -> Nothing) menuKey menus
   whenJust maybeMenu $ \menu -> do
