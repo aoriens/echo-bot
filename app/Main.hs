@@ -5,6 +5,7 @@ module Main
   ) where
 
 import qualified Config
+import Control.Monad
 import Data.IORef
 import qualified Data.Text as T
 import qualified EchoBot
@@ -33,9 +34,12 @@ runConsoleFrontEnd botHandle =
 runTelegramFrontEnd :: Logger.Handle IO -> EchoBot.Handle IO -> IO ()
 runTelegramFrontEnd logHandle botHandle = do
   (teleConfig, implConfig) <- Config.getTelegramConfig
-  handle <-
-    FrontEnd.Telegram.Impl.HTTP.new botHandle logHandle implConfig teleConfig
-  FrontEnd.Telegram.run handle
+  handle <- FrontEnd.Telegram.Impl.HTTP.new logHandle implConfig teleConfig
+  forever $ do
+    events <- FrontEnd.Telegram.receiveEvents handle
+    forM_ events $ \(chatId, event) ->
+      FrontEnd.Telegram.handleResponse handle chatId =<<
+      EchoBot.respond botHandle event
 
 getLogHandle :: IO (Logger.Handle IO)
 getLogHandle = Logger.Impl.new <$> Config.getLoggerConfig

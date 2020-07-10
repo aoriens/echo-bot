@@ -10,7 +10,6 @@ import qualified Data.ByteString.Lazy as BS
 import Data.IORef
 import Data.Maybe
 import Data.String
-import qualified EchoBot
 import qualified FrontEnd.Telegram as T
 import qualified Logger
 import qualified Network.HTTP.Client as HTTP
@@ -25,19 +24,13 @@ newtype Config =
     }
 
 -- | Creates a @FrontEnd.Telegram.Handle@ using http-client.
-new ::
-     EchoBot.Handle IO
-  -> Logger.Handle IO
-  -> Config
-  -> T.Config
-  -> IO (T.Handle IO)
-new botHandle logHandle myConfig telegramConfig = do
+new :: Logger.Handle IO -> Config -> T.Config -> IO (T.Handle IO)
+new logHandle myConfig telegramConfig = do
   httpManager <- HTTP.newManager TLS.tlsManagerSettings
   stateRef <- newIORef T.makeState
   pure
     T.Handle
-      { T.hBotHandle = botHandle
-      , T.hLogHandle = logHandle
+      { T.hLogHandle = logHandle
       , T.hGetHttpResponse = getHttpResponse httpManager myConfig
       , T.hStateHandle =
           FlexibleState.Handle
