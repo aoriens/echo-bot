@@ -65,6 +65,32 @@ spec =
         void $ T.receiveEvents h2
         (_:body:_) <- bodies <$> getRequestsWithMethod e "getUpdates"
         body ! "offset" `shouldBe` A.toJSON (max id1 id2 + 1)
+    it "should send exactly one getUpdates" $ do
+      e <- newEnv
+      let h = defaultHandleWithEmptyGetUpdatesResponseStub e
+      void $ T.receiveEvents h
+      requests <- getRequestsWithMethod e "getUpdates"
+      length requests `shouldBe` 1
+    it
+      "should send the same offset in getUpdates if no entries returned in \
+      \last getUpdates response" $
+      property $ \(NonNegative updateId) -> do
+        e <- newEnv
+        let _ = updateId :: Int
+            h1 =
+              defaultHandleWithHttpHandlers
+                e
+                [ makeResponseForMethod "getUpdates" $
+                  successfulResponse [A.object ["update_id" .= updateId]]
+                ]
+            h2 = defaultHandleWithEmptyGetUpdatesResponseStub e
+            h3 = defaultHandleWithEmptyGetUpdatesResponseStub e
+        void $ T.receiveEvents h1
+        void $ T.receiveEvents h2
+        forgetRequests e
+        void $ T.receiveEvents h3
+        (body:_) <- bodies <$> getRequestsWithMethod e "getUpdates"
+        body ! "offset" `shouldBe` A.toJSON (updateId + 1)
 
 data Env =
   Env
@@ -84,6 +110,9 @@ newEnv = do
       , eReverseRequests = requests
       , eReverseLogEntries = logEntries
       }
+
+forgetRequests :: Env -> IO ()
+forgetRequests env = writeIORef (eReverseRequests env) []
 
 defaultHandleWithEmptyGetUpdatesResponseStub :: Env -> T.Handle IO
 defaultHandleWithEmptyGetUpdatesResponseStub env =
