@@ -43,7 +43,7 @@ spec =
       let zero = A.toJSON (0 :: Int)
       let h = defaultHandleWithEmptyGetUpdatesResponseStub e
       void $ T.receiveEvents h
-      (body:_) <- bodies <$> getRequests e
+      (body:_) <- bodies <$> getRequestsWithMethod e "getUpdates"
       HM.lookupDefault zero "offset" body `shouldBe` zero
     it
       "should have getUpdates with offset one more than maximum of last \
