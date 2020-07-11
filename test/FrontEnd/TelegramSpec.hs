@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, TupleSections #-}
 
 module FrontEnd.TelegramSpec
   ( spec
@@ -6,7 +6,7 @@ module FrontEnd.TelegramSpec
 
 import Control.Monad
 import qualified Data.Aeson as A
-import Data.Aeson ((.=))
+import Data.Aeson ((.:), (.=))
 import qualified Data.Aeson.Types as A
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.HashMap.Strict as HM
@@ -152,6 +152,32 @@ spec = do
         map (HM.lookup "text") rBodies `shouldBe` map (Just . A.toJSON) strings
         map (HM.lookup "chat_id") rBodies `shouldSatisfy`
           all (Just (A.toJSON rawChatId) ==)
+    it
+      "should send a message with the menu title and an inline keyboard \
+      \for menu response" $ do
+      e <- newEnv
+      let rawChatId = 123
+          chatId = T.ChatId rawChatId
+          callbackEvent = error "This event should't be needed"
+          title = "Menu title"
+          opts = [1, 2]
+          h =
+            defaultHandleWithHttpHandlers
+              e
+              [ makeResponseForMethod "sendMessage" $
+                successfulResponse A.emptyArray
+              ]
+          botResponse = EchoBot.MenuResponse title $ map (, callbackEvent) opts
+      T.handleResponse h chatId botResponse
+      (body:_) <- bodies <$> getRequestsWithMethod e "sendMessage"
+      let buttonTitles =
+            flip A.parseEither body $ \o -> do
+              keyboard <- o .: "reply_markup"
+              [buttons] <- keyboard .: "inline_keyboard"
+              mapM (.: "text") buttons
+      HM.lookup "chat_id" body `shouldBe` Just (A.toJSON rawChatId)
+      HM.lookup "text" body `shouldBe` Just (A.toJSON title)
+      buttonTitles `shouldBe` Right (map show opts)
 
 data Env =
   Env
