@@ -9,7 +9,6 @@ import qualified Data.Aeson as A
 import Data.Aeson ((.=))
 import qualified Data.Aeson.Types as A
 import qualified Data.ByteString.Lazy as BS
-import Data.HashMap.Strict ((!))
 import qualified Data.HashMap.Strict as HM
 import Data.IORef
 import Data.Maybe
@@ -38,7 +37,7 @@ spec = do
               {T.hConfig = defaultConfig {T.confPollTimeout = timeout}}
       void $ T.receiveEvents h
       (body:_) <- bodies <$> getRequests e
-      body ! "timeout" `shouldBe` A.toJSON timeout
+      HM.lookup "timeout" body `shouldBe` Just (A.toJSON timeout)
     it "should have first getUpdates request with zero offset or no offset" $ do
       e <- newEnv
       let zero = A.toJSON (0 :: Int)
@@ -65,7 +64,7 @@ spec = do
         void $ T.receiveEvents h1
         void $ T.receiveEvents h2
         (_:body:_) <- bodies <$> getRequestsWithMethod e "getUpdates"
-        body ! "offset" `shouldBe` A.toJSON (max id1 id2 + 1)
+        HM.lookup "offset" body `shouldBe` Just (A.toJSON $ max id1 id2 + 1)
     it "should send exactly one getUpdates" $ do
       e <- newEnv
       let h = defaultHandleWithEmptyGetUpdatesResponseStub e
@@ -91,7 +90,7 @@ spec = do
         forgetRequests e
         void $ T.receiveEvents h3
         (body:_) <- bodies <$> getRequestsWithMethod e "getUpdates"
-        body ! "offset" `shouldBe` A.toJSON (updateId + 1)
+        HM.lookup "offset" body `shouldBe` Just (A.toJSON $ updateId + 1)
     it "should receive as many MessageEvents as user messages arrives" $
       property $ \texts -> do
         e <- newEnv
