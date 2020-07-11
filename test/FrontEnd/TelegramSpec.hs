@@ -14,6 +14,7 @@ import qualified Data.HashMap.Strict as HM
 import Data.IORef
 import Data.Maybe
 import qualified Data.Text as T
+import qualified EchoBot
 import qualified FrontEnd.Telegram as T
 import qualified Logger
 import Test.Hspec
@@ -91,6 +92,48 @@ spec =
         void $ T.receiveEvents h3
         (body:_) <- bodies <$> getRequestsWithMethod e "getUpdates"
         body ! "offset" `shouldBe` A.toJSON (updateId + 1)
+    it "should receive as many MessageEvents as user messages arrives" $
+      property $ \texts -> do
+        e <- newEnv
+        let _ = (texts :: [String])
+            makeUpdate updateId text =
+              A.object
+                [ "update_id" .= updateId
+                , "message" .=
+                  A.object
+                    [ "chat" .= A.object ["id" .= (2 :: Int)]
+                    , "text" .= T.pack text
+                    ]
+                ]
+            h =
+              defaultHandleWithHttpHandlers
+                e
+                [ makeResponseForMethod "getUpdates" .
+                  successfulResponse . map (uncurry makeUpdate) $
+                  zip [(1 :: Int) ..] texts
+                ]
+        events <- T.receiveEvents h
+        map snd events `shouldBe` map (EchoBot.MessageEvent . T.pack) texts
+    it "should receive chatIds arrived in user messages" $
+      property $ \rawChatId -> do
+        e <- newEnv
+        let expectedChatId = T.ChatId rawChatId
+            h =
+              defaultHandleWithHttpHandlers
+                e
+                [ makeResponseForMethod "getUpdates" . successfulResponse $
+                  [ A.object
+                      [ "update_id" .= (1 :: Int)
+                      , "message" .=
+                        A.object
+                          [ "chat" .= A.object ["id" .= rawChatId]
+                          , "text" .= ("text" :: String)
+                          ]
+                      ]
+                  ]
+                ]
+        (chatId, _) <- head <$> T.receiveEvents h
+        chatId `shouldBe` expectedChatId
 
 data Env =
   Env

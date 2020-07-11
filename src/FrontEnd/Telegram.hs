@@ -15,6 +15,7 @@ module FrontEnd.Telegram
   , Handle(..)
   , State
   , Config(..)
+  , ChatId(..)
   , HttpRequest(..)
   , HttpMethod(..)
   ) where
@@ -394,7 +395,7 @@ newtype ChatId =
   ChatId
     { unChatId :: Int
     }
-  deriving (Show, A.FromJSON, A.ToJSON)
+  deriving (Eq, Show, A.FromJSON, A.ToJSON)
 
 newtype UpdateId =
   UpdateId Int
