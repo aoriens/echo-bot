@@ -23,7 +23,7 @@ import Test.QuickCheck
 import qualified Util.FlexibleState as FlexibleState
 
 spec :: Spec
-spec =
+spec = do
   describe "receiveEvents" $ do
     it "should send getUpdates as the first request" $ do
       e <- newEnv
@@ -134,6 +134,25 @@ spec =
                 ]
         (chatId, _) <- head <$> T.receiveEvents h
         chatId `shouldBe` expectedChatId
+  describe "handleResponse" $ do
+    it
+      "should send a message to the correct chat for each entry in \
+      \a EchoBot.RepliesResponse" $
+      property $ \rawChatId strings -> do
+        e <- newEnv
+        let chatId = T.ChatId rawChatId
+            botResponse = EchoBot.RepliesResponse $ map T.pack strings
+            h =
+              defaultHandleWithHttpHandlers
+                e
+                [ makeResponseForMethod "sendMessage" $
+                  successfulResponse A.emptyArray
+                ]
+        T.handleResponse h chatId botResponse
+        rBodies <- bodies <$> getRequestsWithMethod e "sendMessage"
+        map (HM.lookup "text") rBodies `shouldBe` map (Just . A.toJSON) strings
+        map (HM.lookup "chat_id") rBodies `shouldSatisfy`
+          all (Just (A.toJSON rawChatId) ==)
 
 data Env =
   Env
@@ -173,7 +192,9 @@ defaultHandle :: Env -> T.Handle IO
 defaultHandle env =
   T.Handle
     { T.hLogHandle = logHandle env
-    , T.hGetHttpResponse = error "No hGetHttpResponse specified"
+    , T.hGetHttpResponse =
+        \request ->
+          pure $ error ("No response provided for request: " ++ show request)
     , T.hStateHandle =
         FlexibleState.Handle
           { FlexibleState.hGet = readIORef $ eState env
