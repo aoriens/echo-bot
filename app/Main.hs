@@ -38,7 +38,7 @@ runTelegramFrontEnd logHandle botHandle = do
   forever $ do
     events <- FrontEnd.Telegram.receiveEvents handle
     forM_ events $ \(chatId, event) ->
-      FrontEnd.Telegram.handleResponse handle chatId =<<
+      FrontEnd.Telegram.handleBotResponse handle chatId =<<
       EchoBot.respond botHandle event
 
 getLogHandle :: IO (Logger.Handle IO)

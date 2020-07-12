@@ -7,11 +7,11 @@
 --
 -- The module does not use @EchoBot.respond@. You should use
 -- @receiveEvents@, pass the events to @EchoBot.respond@, and pass bot
--- responses to @handleResponses@.
+-- responses to @handleBotResponses@.
 module FrontEnd.Telegram
   ( makeState
   , receiveEvents
-  , handleResponse
+  , handleBotResponse
   , Handle(..)
   , State
   , Config(..)
@@ -116,8 +116,8 @@ receiveEvents h = do
 
 -- | Handles a bot response which is returned by EchoBot and updates
 -- the state.
-handleResponse :: Monad m => Handle m -> ChatId -> EchoBot.Response -> m ()
-handleResponse h chatId response = do
+handleBotResponse :: Monad m => Handle m -> ChatId -> EchoBot.Response -> m ()
+handleBotResponse h chatId response = do
   case response of
     EchoBot.RepliesResponse texts -> mapM_ (sendMessage h chatId) texts
     EchoBot.MenuResponse title opts -> openMenu h chatId title opts

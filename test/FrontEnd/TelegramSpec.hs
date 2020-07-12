@@ -133,7 +133,7 @@ spec = do
                 ]
         (chatId, _) <- head <$> T.receiveEvents h
         chatId `shouldBe` expectedChatId
-  describe "handleResponse" $ do
+  describe "handleBotResponse" $ do
     it
       "should send a message to the correct chat for each entry in \
       \a EchoBot.RepliesResponse" $
@@ -147,7 +147,7 @@ spec = do
                 [ makeResponseForMethod "sendMessage" $
                   successfulResponse A.emptyArray
                 ]
-        T.handleResponse h chatId botResponse
+        T.handleBotResponse h chatId botResponse
         rBodies <- bodies <$> getRequestsWithMethod e "sendMessage"
         map (HM.lookup "text") rBodies `shouldBe` map (Just . A.toJSON) strings
         map (HM.lookup "chat_id") rBodies `shouldSatisfy`
@@ -168,7 +168,7 @@ spec = do
                 successfulResponse A.emptyArray
               ]
           botResponse = EchoBot.MenuResponse title $ map (, callbackEvent) opts
-      T.handleResponse h chatId botResponse
+      T.handleBotResponse h chatId botResponse
       (body:_) <- bodies <$> getRequestsWithMethod e "sendMessage"
       let buttonTitles =
             flip A.parseEither body $ \o -> do
@@ -205,9 +205,9 @@ spec = do
               }
           menuResponse = EchoBot.MenuResponse title [(1, callbackEvent)]
           callbackEvent = error "No callback event should be needed"
-      T.handleResponse h chatId menuResponse
+      T.handleBotResponse h chatId menuResponse
       forgetRequests e
-      T.handleResponse h chatId menuResponse
+      T.handleBotResponse h chatId menuResponse
       (body:_) <- bodies <$> getRequestsWithMethod e "editMessageText"
       HM.lookup "message_id" body `shouldBe` Just (A.toJSON menuMessageId)
       HM.lookup "chat_id" body `shouldBe` Just (A.toJSON rawChatId)
