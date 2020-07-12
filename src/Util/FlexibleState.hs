@@ -3,6 +3,7 @@
 -- | The module introduces the flexible state type class and handle.
 module Util.FlexibleState
   ( Class(..)
+  , gets
   , Handle(..)
   ) where
 
@@ -20,6 +21,10 @@ class Monad m =>
   modify' :: h -> (s -> s) -> m ()
   put h = modify' h . const
   modify' h f = get h >>= \x -> put h $! f x
+
+-- | Get a value derived from the state.
+gets :: Class h s m => h -> (s -> a) -> m a
+gets h f = f <$> get h
 
 -- | A flexible adapter instance of FlexibleState class - the handle
 -- type.

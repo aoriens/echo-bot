@@ -4,12 +4,18 @@
 -- | The module connects the bot business logic and the Telegram
 -- messenger protocol. It is to be isolated from concrete libraries
 -- and I/O yet in order to be tested.
+--
+-- The module does not use @EchoBot.respond@. You should use
+-- @receiveEvents@, pass the events to @EchoBot.respond@, and pass bot
+-- responses to @handleBotResponses@.
 module FrontEnd.Telegram
   ( makeState
-  , run
+  , receiveEvents
+  , handleBotResponse
   , Handle(..)
   , State
   , Config(..)
+  , ChatId(..)
   , HttpRequest(..)
   , HttpMethod(..)
   ) where
@@ -33,7 +39,7 @@ import qualified EchoBot
 import qualified Logger
 import Logger ((.<))
 import qualified Util.FlexibleState as FlexibleState
-import Util.FlexibleState (get, modify')
+import Util.FlexibleState (gets, modify')
 
 data Config =
   Config
@@ -48,27 +54,26 @@ data Config =
     -- large: it reduces server load and clutter in debug logs. A
     -- smaller value (e.g. zero) is convenient for debugging.
     , confPollTimeout :: Int
-    -- | Connection timeout in seconds. It is considered an error when
-    -- no response headers are accepted in this period. An obvious
-    -- exception is the poll request: its connection timeout is
-    -- confPollTimeout seconds more.
-    , confConnectionTimeout :: Int
+    -- | A suffix to be added to the title of an outdated menu. A menu
+    -- is considered outdated if a different menu of the same type is
+    -- sent to the user.
+    , confOutdatedMenuTitleSuffix :: Text
     }
 
 data Handle m =
   Handle
-    { hBotHandle :: EchoBot.Handle m
-    , hLogHandle :: Logger.Handle m
+    { hLogHandle :: Logger.Handle m
     , hGetHttpResponse :: HttpRequest -> m BS.ByteString
     , hStateHandle :: FlexibleState.Handle State m
     , hConfig :: Config
     }
 
-newtype State =
+data State =
   State
       -- | Open menus keyed by ChatId. Each chat can have a dedicated
       -- open menu.
     { stOpenMenus :: IntMap OpenMenu
+    , stNextUpdateId :: UpdateId
     }
 
 -- | Data to describe the currently open menu in a specific chat.
@@ -86,7 +91,9 @@ data HttpRequest =
     , hrURI :: String
     , hrHeaders :: [(String, String)]
     , hrBody :: BS.ByteString
-    , hrResponseTimeout :: Int
+    -- | A number of seconds to add to the default response timeout.
+    -- This is important if the request is expected to wait much time.
+    , hrAdditionalResponseTimeout :: Int
     }
   deriving (Show)
 
@@ -94,52 +101,65 @@ data HttpMethod =
   POST
   deriving (Show)
 
+-- | Creates an initial state to be returned from @get $ hStateHandle
+-- handle@ until changed.
 makeState :: State
-makeState = State mempty
+makeState = State {stOpenMenus = mempty, stNextUpdateId = UpdateId 0}
 
-run :: Monad m => Handle m -> m ()
-run h = go $ UpdateId 0
-  where
-    go nextUpdateId = do
-      (lastId, events) <- receiveEvents h nextUpdateId
-      forM_ events $ handleEvent h
-      go $ maybe nextUpdateId succ lastId
+-- | Receives new bot events from Telegram and updates the state.
+receiveEvents :: Monad m => Handle m -> m [(ChatId, EchoBot.Event)]
+receiveEvents h = do
+  nextUpdateId <- gets h stNextUpdateId
+  (lastId, events) <- receiveLowLevelEvents h nextUpdateId
+  modify' h $ \s -> s {stNextUpdateId = maybe nextUpdateId succ lastId}
+  concat <$> mapM (getBotEventFromEvent h) events
 
-receiveEvents :: Monad m => Handle m -> UpdateId -> m (Maybe UpdateId, [Event])
-receiveEvents h nextUpdateId = do
+-- | Handles a bot response which is returned by EchoBot and updates
+-- the state.
+handleBotResponse :: Monad m => Handle m -> ChatId -> EchoBot.Response -> m ()
+handleBotResponse h chatId response = do
+  case response of
+    EchoBot.RepliesResponse texts -> mapM_ (sendMessage h chatId) texts
+    EchoBot.MenuResponse title opts -> openMenu h chatId title opts
+    EchoBot.EmptyResponse -> pure ()
+
+receiveLowLevelEvents ::
+     Monad m => Handle m -> UpdateId -> m (Maybe UpdateId, [Event])
+receiveLowLevelEvents h nextUpdateId = do
   getResponseWithMethodAndRequestModifier
     h
     (ApiMethod "getUpdates")
     (A.object ["offset" .= nextUpdateId, "timeout" .= pollTimeout])
     (\request ->
-       request {hrResponseTimeout = hrResponseTimeout request + pollTimeout})
+       request
+         { hrAdditionalResponseTimeout =
+             hrAdditionalResponseTimeout request + pollTimeout
+         })
     parseUpdatesResponse
   where
     pollTimeout = confPollTimeout $ hConfig h
 
-handleEvent :: Monad m => Handle m -> Event -> m ()
-handleEvent h (MessageEvent message) =
-  sendRequestToBotAndHandleOutput
-    h
-    (messageChatId message)
-    (EchoBot.MessageEvent $ messageText message)
-handleEvent h (MenuChoiceEvent callbackQuery) =
-  void . runMaybeT $ do
+getBotEventFromEvent ::
+     Monad m => Handle m -> Event -> m [(ChatId, EchoBot.Event)]
+getBotEventFromEvent _ (MessageEvent message) =
+  pure [(messageChatId message, EchoBot.MessageEvent $ messageText message)]
+getBotEventFromEvent h (MenuChoiceEvent callbackQuery) =
+  fmap maybeToList . runMaybeT $ do
     confirmToServer
     menu <- findOpenMenuOrExit
     exitIfBadMessageId menu
     botRequest <- findBotRequestMatchingChoiceOrExit menu
-    lift $ do
-      closeMenuWithReplacementText
+    lift $
+      closeMenuAddingTitleSuffix
         h
         (cqChatId callbackQuery)
-        "You have already made your choice"
-      sendRequestToBotAndHandleOutput h chatId botRequest
+        "\n(You have already made your choice)"
+    pure (chatId, botRequest)
   where
     confirmToServer =
       lift . sendAnswerCallbackQueryRequest h $ cqId callbackQuery
     findOpenMenuOrExit = do
-      menus <- stOpenMenus <$> lift (get h)
+      menus <- lift $ gets h stOpenMenus
       maybe exitWithNoOpenMenu pure $ IntMap.lookup menuKey menus
     exitIfBadMessageId menu =
       when (cqMessageId callbackQuery /= omMessageId menu) $
@@ -163,26 +183,20 @@ handleEvent h (MenuChoiceEvent callbackQuery) =
     menuKey = unChatId chatId
     chatId = cqChatId callbackQuery
 
-sendRequestToBotAndHandleOutput ::
-     Monad m => Handle m -> ChatId -> EchoBot.Event -> m ()
-sendRequestToBotAndHandleOutput h chatId request = do
-  response <- EchoBot.respond (hBotHandle h) request
-  case response of
-    EchoBot.RepliesResponse texts -> mapM_ (sendMessage h chatId) texts
-    EchoBot.MenuResponse title opts -> openMenu h chatId title opts
-    EchoBot.EmptyResponse -> pure ()
-
 -- | Sends a menu with repetition count options. Currently no other
 -- menus are implemented.
 openMenu ::
      Monad m => Handle m -> ChatId -> Text -> [(Int, EchoBot.Event)] -> m ()
 openMenu h chatId title opts = do
-  closeMenuWithReplacementText h chatId "The menu is now out-of-date"
+  closeMenuAddingTitleSuffix h chatId . confOutdatedMenuTitleSuffix $ hConfig h
   Logger.info h "Sending a message with menu"
   messageId <-
     sendMessageWithInlineKeyboard h chatId title [zip callbackDataList labels]
-  modify' h $
-    State . IntMap.insert (unChatId chatId) (makeMenu messageId) . stOpenMenus
+  modify' h $ \s ->
+    s
+      { stOpenMenus =
+          IntMap.insert (unChatId chatId) (makeMenu messageId) (stOpenMenus s)
+      }
   where
     callbackDataList = map (CallbackData . T.pack . show) ([0 ..] :: [Int])
     labels = map (T.pack . show . fst) opts
@@ -195,14 +209,14 @@ openMenu h chatId title opts = do
 
 -- | Safely deletes menu both from the chat and from the pending menu
 -- table.
-closeMenuWithReplacementText :: Monad m => Handle m -> ChatId -> Text -> m ()
-closeMenuWithReplacementText h chatId replacementText = do
-  menus <- stOpenMenus <$> get h
+closeMenuAddingTitleSuffix :: Monad m => Handle m -> ChatId -> Text -> m ()
+closeMenuAddingTitleSuffix h chatId titleSuffix = do
+  menus <- gets h stOpenMenus
   let (maybeMenu, menus') =
         IntMap.updateLookupWithKey (\_ _ -> Nothing) menuKey menus
   whenJust maybeMenu $ \menu -> do
-    Logger.info h $ "Closing menu with replacement text: " <> replacementText
-    modify' h $ const (State menus')
+    Logger.info h $ "Closing menu with title suffix: " <> titleSuffix
+    modify' h $ \s -> s {stOpenMenus = menus'}
     deleteMenuFromChat menu
   where
     menuKey = unChatId chatId
@@ -212,7 +226,7 @@ closeMenuWithReplacementText h chatId replacementText = do
         chatId
         (omMessageId menu)
         (makeEditedTitle menu)
-    makeEditedTitle menu = omTitle menu <> "\n(" <> replacementText <> ")"
+    makeEditedTitle menu = omTitle menu <> titleSuffix
 
 sendMessage :: Monad m => Handle m -> ChatId -> Text -> m ()
 sendMessage h chatId text = do
@@ -293,7 +307,7 @@ getResponseWithMethodAndRequestModifier h method request httpRequestModifier par
           , hrURI = endpointURI h method
           , hrHeaders = [("Content-Type", "application/json")]
           , hrBody = A.encode request
-          , hrResponseTimeout = confConnectionTimeout $ hConfig h
+          , hrAdditionalResponseTimeout = 0
           }
     getResult response =
       pure $ do
@@ -385,7 +399,7 @@ newtype ChatId =
   ChatId
     { unChatId :: Int
     }
-  deriving (Show, A.FromJSON, A.ToJSON)
+  deriving (Eq, Show, A.FromJSON, A.ToJSON)
 
 newtype UpdateId =
   UpdateId Int
