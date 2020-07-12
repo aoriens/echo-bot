@@ -133,6 +133,38 @@ spec = do
                 ]
         (chatId, _) <- head <$> T.receiveEvents h
         chatId `shouldBe` expectedChatId
+    it "should send answerCallbackQuery for each CallbackQuery" $
+      property $ \testData -> do
+        e <- newEnv
+        let _ = (testData :: [(String, String, Int, Int, Int)])
+            h =
+              defaultHandleWithHttpHandlers
+                e
+                [ makeResponseForMethod "getUpdates" . successfulResponse $
+                  map makeCallbackQuery testData
+                , makeResponseForMethod "answerCallbackQuery" $
+                  successfulResponse True
+                ]
+            makeCallbackQuery (cqId, cqData, updateId, chatId, messageId) =
+              A.object
+                [ "update_id" .= updateId
+                , "callback_query" .=
+                  A.object
+                    [ "id" .= cqId
+                    , "data" .= cqData
+                    , "message" .=
+                      A.object
+                        [ "message_id" .= messageId
+                        , "chat" .= A.object ["id" .= chatId]
+                        ]
+                    ]
+                ]
+        void $ T.receiveEvents h
+        receivedIds <-
+          map (HM.lookup "callback_query_id") . bodies <$>
+          getRequestsWithMethod e "answerCallbackQuery"
+        receivedIds `shouldMatchList`
+          map (\(cqId, _, _, _, _) -> Just $ A.toJSON cqId) testData
   describe "handleBotResponse" $ do
     it
       "should send a message to the correct chat for each entry in \
