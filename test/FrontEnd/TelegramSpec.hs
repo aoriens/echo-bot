@@ -178,6 +178,41 @@ spec = do
       HM.lookup "chat_id" body `shouldBe` Just (A.toJSON rawChatId)
       HM.lookup "text" body `shouldBe` Just (A.toJSON title)
       buttonTitles `shouldBe` Right (map show opts)
+    it
+      "should edit the menu removing buttons and modifying the title \
+       \if a new menu is output" $ do
+      e <- newEnv
+      let rawChatId = 123
+          chatId = T.ChatId rawChatId
+          title = "Menu title"
+          editedMenuTitleSuffix = "(edited)"
+          editedTitle = title <> editedMenuTitleSuffix
+          menuMessageId = (111 :: Int)
+          h =
+            (defaultHandle e)
+              { T.hGetHttpResponse =
+                  httpServerStubWithHandlers
+                    e
+                    [ makeResponseForMethod "sendMessage" $
+                      successfulResponse $
+                      A.object ["message_id" .= menuMessageId]
+                    , makeResponseForMethod "editMessageText" $
+                      successfulResponse A.emptyArray
+                    ]
+              , T.hConfig =
+                  defaultConfig
+                    {T.confOutdatedMenuTitleSuffix = editedMenuTitleSuffix}
+              }
+          menuResponse = EchoBot.MenuResponse title [(1, callbackEvent)]
+          callbackEvent = error "No callback event should be needed"
+      T.handleResponse h chatId menuResponse
+      forgetRequests e
+      T.handleResponse h chatId menuResponse
+      (body:_) <- bodies <$> getRequestsWithMethod e "editMessageText"
+      HM.lookup "message_id" body `shouldBe` Just (A.toJSON menuMessageId)
+      HM.lookup "chat_id" body `shouldBe` Just (A.toJSON rawChatId)
+      HM.lookup "text" body `shouldBe` Just (A.toJSON editedTitle)
+      HM.lookup "reply_markup" body `shouldBe` Nothing
 
 data Env =
   Env
@@ -234,6 +269,7 @@ defaultConfig =
     { T.confApiToken = T.pack defaultApiToken
     , T.confURLPrefixWithoutTrailingSlash = defaultURLPrefix
     , T.confPollTimeout = 123
+    , T.confOutdatedMenuTitleSuffix = ""
     }
 
 defaultApiToken :: String

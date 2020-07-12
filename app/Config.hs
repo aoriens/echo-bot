@@ -60,6 +60,8 @@ getTelegramConfig =
           , FrontEnd.Telegram.confURLPrefixWithoutTrailingSlash =
               T.unpack $ unslash urlPrefix
           , FrontEnd.Telegram.confPollTimeout = pollTimeout
+          , FrontEnd.Telegram.confOutdatedMenuTitleSuffix =
+              "The menu is now out-of-date"
           }
       , TelegramHttp.Config
           {TelegramHttp.confResponseTimeout = connectionTimeout})

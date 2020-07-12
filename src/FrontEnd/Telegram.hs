@@ -54,6 +54,10 @@ data Config =
     -- large: it reduces server load and clutter in debug logs. A
     -- smaller value (e.g. zero) is convenient for debugging.
     , confPollTimeout :: Int
+    -- | A suffix to be added to the title of an outdated menu. A menu
+    -- is considered outdated if a different menu of the same type is
+    -- sent to the user.
+    , confOutdatedMenuTitleSuffix :: Text
     }
 
 data Handle m =
@@ -146,10 +150,10 @@ getBotEventFromEvent h (MenuChoiceEvent callbackQuery) =
     exitIfBadMessageId menu
     botRequest <- findBotRequestMatchingChoiceOrExit menu
     lift $
-      closeMenuWithReplacementText
+      closeMenuAddingTitleSuffix
         h
         (cqChatId callbackQuery)
-        "You have already made your choice"
+        "\n(You have already made your choice)"
     pure (chatId, botRequest)
   where
     confirmToServer =
@@ -184,7 +188,7 @@ getBotEventFromEvent h (MenuChoiceEvent callbackQuery) =
 openMenu ::
      Monad m => Handle m -> ChatId -> Text -> [(Int, EchoBot.Event)] -> m ()
 openMenu h chatId title opts = do
-  closeMenuWithReplacementText h chatId "The menu is now out-of-date"
+  closeMenuAddingTitleSuffix h chatId . confOutdatedMenuTitleSuffix $ hConfig h
   Logger.info h "Sending a message with menu"
   messageId <-
     sendMessageWithInlineKeyboard h chatId title [zip callbackDataList labels]
@@ -205,13 +209,13 @@ openMenu h chatId title opts = do
 
 -- | Safely deletes menu both from the chat and from the pending menu
 -- table.
-closeMenuWithReplacementText :: Monad m => Handle m -> ChatId -> Text -> m ()
-closeMenuWithReplacementText h chatId replacementText = do
+closeMenuAddingTitleSuffix :: Monad m => Handle m -> ChatId -> Text -> m ()
+closeMenuAddingTitleSuffix h chatId titleSuffix = do
   menus <- gets h stOpenMenus
   let (maybeMenu, menus') =
         IntMap.updateLookupWithKey (\_ _ -> Nothing) menuKey menus
   whenJust maybeMenu $ \menu -> do
-    Logger.info h $ "Closing menu with replacement text: " <> replacementText
+    Logger.info h $ "Closing menu with title suffix: " <> titleSuffix
     modify' h $ \s -> s {stOpenMenus = menus'}
     deleteMenuFromChat menu
   where
@@ -222,7 +226,7 @@ closeMenuWithReplacementText h chatId replacementText = do
         chatId
         (omMessageId menu)
         (makeEditedTitle menu)
-    makeEditedTitle menu = omTitle menu <> "\n(" <> replacementText <> ")"
+    makeEditedTitle menu = omTitle menu <> titleSuffix
 
 sendMessage :: Monad m => Handle m -> ChatId -> Text -> m ()
 sendMessage h chatId text = do
