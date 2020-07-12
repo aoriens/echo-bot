@@ -29,8 +29,8 @@ import qualified Data.Aeson as A
 import Data.Aeson ((.:), (.=))
 import qualified Data.Aeson.Types as A
 import qualified Data.ByteString.Lazy as BS
-import qualified Data.IntMap.Lazy as IntMap
-import Data.IntMap.Lazy (IntMap)
+import qualified Data.IntMap.Strict as IntMap
+import Data.IntMap.Strict (IntMap)
 import Data.Maybe
 import Data.Semigroup
 import Data.Text (Text)
