@@ -101,6 +101,12 @@ data HttpMethod =
   POST
   deriving (Show)
 
+newtype RequestError =
+  JSONError String
+  deriving (Show)
+
+type Failable = Either RequestError
+
 -- | Creates an initial state to be returned from @get $ hStateHandle
 -- handle@ until changed.
 makeState :: State
@@ -110,9 +116,12 @@ makeState = State {stOpenMenus = mempty, stNextUpdateId = UpdateId 0}
 receiveEvents :: Monad m => Handle m -> m [(ChatId, EchoBot.Event)]
 receiveEvents h = do
   nextUpdateId <- gets h stNextUpdateId
-  (lastId, events) <- receiveLowLevelEvents h nextUpdateId
-  modify' h $ \s -> s {stNextUpdateId = maybe nextUpdateId succ lastId}
-  concat <$> mapM (getBotEventFromEvent h) events
+  r <- receiveLowLevelEvents h nextUpdateId
+  case r of
+    Right (lastId, events) -> do
+      modify' h $ \s -> s {stNextUpdateId = maybe nextUpdateId succ lastId}
+      concat <$> mapM (getBotEventFromEvent h) events
+    Left _ -> pure []
 
 -- | Handles a bot response which is returned by EchoBot and updates
 -- the state.
@@ -124,7 +133,7 @@ handleBotResponse h chatId response = do
     EchoBot.EmptyResponse -> pure ()
 
 receiveLowLevelEvents ::
-     Monad m => Handle m -> UpdateId -> m (Maybe UpdateId, [Event])
+     Monad m => Handle m -> UpdateId -> m (Failable (Maybe UpdateId, [Event]))
 receiveLowLevelEvents h nextUpdateId = do
   getResponseWithMethodAndRequestModifier
     h
@@ -157,7 +166,7 @@ getBotEventFromEvent h (MenuChoiceEvent callbackQuery) =
     pure (chatId, botRequest)
   where
     confirmToServer =
-      lift . sendAnswerCallbackQueryRequest h $ cqId callbackQuery
+      void . lift . sendAnswerCallbackQueryRequest h $ cqId callbackQuery
     findOpenMenuOrExit = do
       menus <- lift $ gets h stOpenMenus
       maybe exitWithNoOpenMenu pure $ IntMap.lookup menuKey menus
@@ -190,16 +199,23 @@ openMenu ::
 openMenu h chatId title opts = do
   closeMenuAddingTitleSuffix h chatId . confOutdatedMenuTitleSuffix $ hConfig h
   Logger.info h "Sending a message with menu"
-  messageId <-
+  r <-
     sendMessageWithInlineKeyboard h chatId title [zip callbackDataList labels]
-  modify' h $ \s ->
-    s
-      { stOpenMenus =
-          IntMap.insert (unChatId chatId) (makeMenu messageId) (stOpenMenus s)
-      }
+  case r of
+    Right messageId -> rememberMenuWithMessageId messageId
+    Left _ -> pure ()
   where
     callbackDataList = map (CallbackData . T.pack . show) ([0 ..] :: [Int])
     labels = map (T.pack . show . fst) opts
+    rememberMenuWithMessageId messageId =
+      modify' h $ \s ->
+        s
+          { stOpenMenus =
+              IntMap.insert
+                (unChatId chatId)
+                (makeMenu messageId)
+                (stOpenMenus s)
+          }
     makeMenu messageId =
       OpenMenu
         { omMessageId = messageId
@@ -217,7 +233,7 @@ closeMenuAddingTitleSuffix h chatId titleSuffix = do
   whenJust maybeMenu $ \menu -> do
     Logger.info h $ "Closing menu with title suffix: " <> titleSuffix
     modify' h $ \s -> s {stOpenMenus = menus'}
-    deleteMenuFromChat menu
+    void $ deleteMenuFromChat menu
   where
     menuKey = unChatId chatId
     deleteMenuFromChat menu =
@@ -228,7 +244,7 @@ closeMenuAddingTitleSuffix h chatId titleSuffix = do
         (makeEditedTitle menu)
     makeEditedTitle menu = omTitle menu <> titleSuffix
 
-sendMessage :: Monad m => Handle m -> ChatId -> Text -> m ()
+sendMessage :: Monad m => Handle m -> ChatId -> Text -> m (Failable ())
 sendMessage h chatId text = do
   executeMethod
     h
@@ -241,7 +257,7 @@ sendMessageWithInlineKeyboard ::
   -> ChatId
   -> Text
   -> [[(CallbackData, Text)]]
-  -> m MessageId
+  -> m (Failable MessageId)
 sendMessageWithInlineKeyboard h chatId title opts =
   getResponseWithMethod h (ApiMethod "sendMessage") request parseMessageId
   where
@@ -259,7 +275,8 @@ sendMessageWithInlineKeyboard h chatId title opts =
         message <- r .: "result"
         message .: "message_id"
 
-sendAnswerCallbackQueryRequest :: Monad m => Handle m -> CallbackQueryId -> m ()
+sendAnswerCallbackQueryRequest ::
+     Monad m => Handle m -> CallbackQueryId -> m (Failable ())
 sendAnswerCallbackQueryRequest h queryId =
   executeMethod
     h
@@ -267,7 +284,7 @@ sendAnswerCallbackQueryRequest h queryId =
     (A.object ["callback_query_id" .= queryId])
 
 sendEditMessageTextRequest ::
-     Monad m => Handle m -> ChatId -> MessageId -> Text -> m ()
+     Monad m => Handle m -> ChatId -> MessageId -> Text -> m (Failable ())
 sendEditMessageTextRequest h chatId messageId text =
   executeMethod
     h
@@ -280,7 +297,7 @@ getResponseWithMethod ::
   -> ApiMethod
   -> request
   -> (A.Value -> A.Parser response)
-  -> m response
+  -> m (Failable response)
 getResponseWithMethod h method request =
   getResponseWithMethodAndRequestModifier h method request id
 
@@ -291,14 +308,14 @@ getResponseWithMethodAndRequestModifier ::
   -> request
   -> (HttpRequest -> HttpRequest)
   -> (A.Value -> A.Parser response)
-  -> m response
+  -> m (Failable response)
 getResponseWithMethodAndRequestModifier h method request httpRequestModifier parser = do
   Logger.debug h $ "Send " .< method <> ": " .< A.encode request
   response <- hGetHttpResponse h httpRequest
   Logger.debug h $ "Responded with " .< response
-  result <- getResult response
+  let result = decodeResponse response
   logResult result
-  pure $ either error id result
+  pure result
   where
     httpRequest =
       httpRequestModifier
@@ -309,15 +326,18 @@ getResponseWithMethodAndRequestModifier h method request httpRequestModifier par
           , hrBody = A.encode request
           , hrAdditionalResponseTimeout = 0
           }
-    getResult response =
-      pure $ do
-        value <- A.eitherDecode response
-        A.parseEither parser value
-    logResult (Left e) = Logger.error h $ "Response error: " <> T.pack e
+    decodeResponse response =
+      either (Left . JSONError) Right $
+      A.parseEither parser =<< A.eitherDecode response
+    logResult (Left e) = Logger.error h $ "Response error: " .< e
     logResult _ = pure ()
 
 executeMethod ::
-     (A.ToJSON request, Monad m) => Handle m -> ApiMethod -> request -> m ()
+     (A.ToJSON request, Monad m)
+  => Handle m
+  -> ApiMethod
+  -> request
+  -> m (Failable ())
 executeMethod h method request =
   getResponseWithMethod h method request (const $ pure ())
 
