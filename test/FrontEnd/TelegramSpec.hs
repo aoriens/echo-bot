@@ -22,7 +22,9 @@ import Test.QuickCheck
 import qualified Util.FlexibleState as FlexibleState
 
 spec :: Spec
-spec = do
+spec
+  {- HLINT ignore spec "Reduce duplication" -}
+ = do
   describe "receiveEvents" $ do
     it "should send getUpdates as the first request" $ do
       e <- newEnv
@@ -107,9 +109,8 @@ spec = do
             h =
               defaultHandleWithHttpHandlers
                 e
-                [ makeResponseForMethod "getUpdates" .
-                  successfulResponse . map (uncurry makeUpdate) $
-                  zip [(1 :: Int) ..] texts
+                [ makeResponseForMethod "getUpdates" . successfulResponse $
+                  zipWith makeUpdate [(1 :: Int) ..] texts
                 ]
         events <- T.receiveEvents h
         map snd events `shouldBe` map (EchoBot.MessageEvent . T.pack) texts
