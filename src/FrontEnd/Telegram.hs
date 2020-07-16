@@ -359,7 +359,8 @@ parseUpdatesResponse :: A.Value -> A.Parser (Maybe UpdateId, [Event])
 parseUpdatesResponse =
   A.withObject "response" $ \r -> do
     updates <- r .: "result"
-    (safeMaximum *** catMaybes) . unzip <$> traverse parseUpdate updates
+    (safeMaximum *** catMaybes) . unzip . catMaybes <$>
+      mapM (optional . parseUpdate) updates
   where
     safeMaximum = fmap getMax . foldMap (Just . Max)
     parseUpdate =

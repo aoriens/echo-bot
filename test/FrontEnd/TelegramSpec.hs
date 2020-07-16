@@ -133,6 +133,61 @@ spec = do
                 ]
         (chatId, _) <- head <$> T.receiveEvents h
         chatId `shouldBe` expectedChatId
+    it "should ignore malformed updates and return well-formed MessageEvents" $ do
+      e <- newEnv
+      let h =
+            defaultHandleWithHttpHandlers
+              e
+              [ makeResponseForMethod "getUpdates" . successfulResponse $
+                [ entryWithoutId
+                , entryWithoutMessage
+                , entryWithoutChatId
+                , entryWithNonStringText
+                , correctEntry
+                , entryWithoutText
+                ]
+              ]
+          correctEntry =
+            A.object
+              [ "update_id" .= (1 :: Int)
+              , "message" .=
+                A.object
+                  [ "chat" .= A.object ["id" .= (1 :: Int)]
+                  , "text" .= correctEntryText
+                  ]
+              ]
+          correctEntryText = ("correctText" :: T.Text)
+          entryWithoutId =
+            A.object
+              [ "message" .=
+                A.object
+                  [ "chat" .= A.object ["id" .= (1 :: Int)]
+                  , "text" .= ("text" :: String)
+                  ]
+              ]
+          entryWithoutMessage = A.object ["update_id" .= (2 :: Int)]
+          entryWithoutChatId =
+            A.object
+              [ "update_id" .= (1 :: Int)
+              , "message" .=
+                A.object ["chat" .= A.object [], "text" .= correctEntryText]
+              ]
+          entryWithNonStringText =
+            A.object
+              [ "update_id" .= (1 :: Int)
+              , "message" .=
+                A.object
+                  [ "chat" .= A.object ["id" .= (1 :: Int)]
+                  , "text" .= (2222 :: Int)
+                  ]
+              ]
+          entryWithoutText =
+            A.object
+              [ "update_id" .= (1 :: Int)
+              , "message" .= A.object ["chat" .= A.object ["id" .= (1 :: Int)]]
+              ]
+      events <- T.receiveEvents h
+      map snd events `shouldBe` map EchoBot.MessageEvent [correctEntryText]
     it "should send answerCallbackQuery for each CallbackQuery" $
       property $ \testData -> do
         e <- newEnv
