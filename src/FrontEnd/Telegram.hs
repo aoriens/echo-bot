@@ -270,10 +270,7 @@ sendMessageWithInlineKeyboard h chatId title opts =
         ]
     makeButton (callbackData, text) =
       A.object ["callback_data" .= callbackData, "text" .= text]
-    parseMessageId =
-      A.withObject "response" $ \r -> do
-        message <- r .: "result"
-        message .: "message_id"
+    parseMessageId = withSuccessfulResponse (.: "message_id")
 
 sendAnswerCallbackQueryRequest ::
      Monad m => Handle m -> CallbackQueryId -> m (Failable ())
@@ -357,10 +354,9 @@ instance Monad m => FlexibleState.Class (Handle m) State m where
 
 parseUpdatesResponse :: A.Value -> A.Parser (Maybe UpdateId, [Event])
 parseUpdatesResponse =
-  A.withObject "response" $ \r -> do
-    updates <- r .: "result"
-    (safeMaximum *** catMaybes) . unzip . catMaybes <$>
-      mapM (optional . parseUpdate) updates
+  withSuccessfulResponse $
+  fmap ((safeMaximum *** catMaybes) . unzip . catMaybes) .
+  mapM (optional . parseUpdate)
   where
     safeMaximum = fmap getMax . foldMap (Just . Max)
     parseUpdate =
@@ -370,6 +366,11 @@ parseUpdatesResponse =
       (MessageEvent <$> update .: "message") <|>
       (MenuChoiceEvent <$> update .: "callback_query") <|>
       fail "unsupported kind of 'Update' object"
+
+withSuccessfulResponse ::
+     (A.FromJSON a) => (a -> A.Parser b) -> A.Value -> A.Parser b
+withSuccessfulResponse parser =
+  A.withObject "response" $ \r -> parser =<< r .: "result"
 
 -- | An event that can occur in the chat, caused by the user.
 data Event
