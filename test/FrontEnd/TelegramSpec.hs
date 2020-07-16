@@ -240,6 +240,18 @@ spec = do
         map (HM.lookup "chat_id") rBodies `shouldSatisfy`
           all (Just (A.toJSON rawChatId) ==)
     it
+      "should do sendMessage if previous sendMessage resulted in malformed response" $ do
+      e <- newEnv
+      let chatId = T.ChatId 1
+          botResponse = EchoBot.RepliesResponse ["text1", "text2"]
+          h =
+            defaultHandleWithHttpHandlers
+              e
+              [makeRawResponseForMethod "sendMessage" "BAD_JSON!"]
+      T.handleBotResponse h chatId botResponse
+      requests <- getRequestsWithMethod e "sendMessage"
+      length requests `shouldBe` 2
+    it
       "should send a message with the menu title and an inline keyboard \
       \for menu response" $ do
       e <- newEnv
@@ -330,7 +342,7 @@ defaultHandleWithEmptyGetUpdatesResponseStub env =
     [makeResponseForMethod "getUpdates" $ successfulResponse A.emptyArray]
 
 defaultHandleWithHttpHandlers ::
-     Env -> [T.HttpRequest -> IO (Maybe A.Value)] -> T.Handle IO
+     Env -> [T.HttpRequest -> IO (Maybe BS.ByteString)] -> T.Handle IO
 defaultHandleWithHttpHandlers env handlers =
   (defaultHandle env)
     {T.hGetHttpResponse = httpServerStubWithHandlers env handlers}
@@ -396,10 +408,9 @@ getRequestsWithMethod env apiMethod = filter p <$> getRequests env
     p = (uriWithMethod apiMethod ==) . T.hrURI
 
 -- | A function type for calculating a response for some kind of HTTP
--- requests. It has partial type, so that it can return Nothing
--- wrapped in the monad to designate that another handler should be
--- tried to generate a response.
-type HttpRequestHandler = T.HttpRequest -> IO (Maybe A.Value)
+-- requests. It can return Nothing wrapped in the monad to designate
+-- that another handler should be tried to generate a response.
+type HttpRequestHandler = T.HttpRequest -> IO (Maybe BS.ByteString)
 
 -- | A stub implementation of HTTP requesting.
 httpServerStubWithHandlers ::
@@ -412,15 +423,18 @@ httpServerStubWithHandlers ::
 httpServerStubWithHandlers env handlers request = do
   modifyIORef' (eReverseRequests env) (request :)
   responses <- catMaybes <$> mapM ($ request) handlers
-  pure . maybe fatal A.encode $ listToMaybe responses
+  pure . fromMaybe fatal $ listToMaybe responses
   where
     fatal = error $ "No response stub provided for request: " ++ show request
 
 type ApiMethod = String
 
 makeResponseForMethod :: ApiMethod -> A.Value -> HttpRequestHandler
-makeResponseForMethod method response request =
+makeResponseForMethod method = makeRawResponseForMethod method . A.encode
+
+makeRawResponseForMethod :: ApiMethod -> BS.ByteString -> HttpRequestHandler
+makeRawResponseForMethod method body request =
   pure $
   if uriWithMethod method == T.hrURI request
-    then Just response
+    then Just body
     else Nothing
