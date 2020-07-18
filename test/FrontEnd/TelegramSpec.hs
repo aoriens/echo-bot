@@ -28,14 +28,14 @@ spec
   describe "receiveEvents" $ do
     it "should send getUpdates as the first request" $ do
       e <- newEnv
-      let h = defaultHandleWithEmptyGetUpdatesResponseStub e
+      let h = handleWithEmptyGetUpdatesResponseStub e
       void $ T.receiveEvents h
       (request:_) <- getRequests e
       T.hrURI request `shouldBe` uriWithMethod "getUpdates"
     prop "should send configured timeout in getUpdates" $ \(NonNegative timeout) -> do
       e <- newEnv
       let h =
-            (defaultHandleWithEmptyGetUpdatesResponseStub e)
+            (handleWithEmptyGetUpdatesResponseStub e)
               {T.hConfig = defaultConfig {T.confPollTimeout = timeout}}
       void $ T.receiveEvents h
       (body:_) <- bodies <$> getRequests e
@@ -43,7 +43,7 @@ spec
     it "should have first getUpdates request with zero offset or no offset" $ do
       e <- newEnv
       let zero = A.toJSON (0 :: Int)
-      let h = defaultHandleWithEmptyGetUpdatesResponseStub e
+      let h = handleWithEmptyGetUpdatesResponseStub e
       void $ T.receiveEvents h
       (body:_) <- bodies <$> getRequestsWithMethod e "getUpdates"
       HM.lookupDefault zero "offset" body `shouldBe` zero
@@ -54,7 +54,7 @@ spec
         e <- newEnv
         let _ = (id1 :: Int, id2 :: Int)
             h1 =
-              defaultHandleWithHttpHandlers
+              handleWithStubs
                 e
                 [ makeResponseForMethod "getUpdates" $
                   successfulResponse
@@ -62,14 +62,14 @@ spec
                     , A.object ["update_id" .= id2]
                     ]
                 ]
-            h2 = defaultHandleWithEmptyGetUpdatesResponseStub e
+            h2 = handleWithEmptyGetUpdatesResponseStub e
         void $ T.receiveEvents h1
         void $ T.receiveEvents h2
         (_:body:_) <- bodies <$> getRequestsWithMethod e "getUpdates"
         HM.lookup "offset" body `shouldBe` Just (A.toJSON $ max id1 id2 + 1)
     it "should send exactly one getUpdates" $ do
       e <- newEnv
-      let h = defaultHandleWithEmptyGetUpdatesResponseStub e
+      let h = handleWithEmptyGetUpdatesResponseStub e
       void $ T.receiveEvents h
       requests <- getRequestsWithMethod e "getUpdates"
       length requests `shouldBe` 1
@@ -80,13 +80,13 @@ spec
         e <- newEnv
         let _ = updateId :: Int
             h1 =
-              defaultHandleWithHttpHandlers
+              handleWithStubs
                 e
                 [ makeResponseForMethod "getUpdates" $
                   successfulResponse [A.object ["update_id" .= updateId]]
                 ]
-            h2 = defaultHandleWithEmptyGetUpdatesResponseStub e
-            h3 = defaultHandleWithEmptyGetUpdatesResponseStub e
+            h2 = handleWithEmptyGetUpdatesResponseStub e
+            h3 = handleWithEmptyGetUpdatesResponseStub e
         void $ T.receiveEvents h1
         void $ T.receiveEvents h2
         forgetRequests e
@@ -107,7 +107,7 @@ spec
                     ]
                 ]
             h =
-              defaultHandleWithHttpHandlers
+              handleWithStubs
                 e
                 [ makeResponseForMethod "getUpdates" . successfulResponse $
                   zipWith makeUpdate [(1 :: Int) ..] texts
@@ -119,7 +119,7 @@ spec
         e <- newEnv
         let expectedChatId = T.ChatId rawChatId
             h =
-              defaultHandleWithHttpHandlers
+              handleWithStubs
                 e
                 [ makeResponseForMethod "getUpdates" . successfulResponse $
                   [ A.object
@@ -137,7 +137,7 @@ spec
     it "should ignore malformed updates and return well-formed MessageEvents" $ do
       e <- newEnv
       let h =
-            defaultHandleWithHttpHandlers
+            handleWithStubs
               e
               [ makeResponseForMethod "getUpdates" . successfulResponse $
                 [ entryWithoutId
@@ -192,7 +192,7 @@ spec
     it "should not return events if got non-200 status" $ do
       e <- newEnv
       let h =
-            defaultHandleWithHttpHandlers
+            handleWithStubs
               e
               [ makeResponseWithStatus400ForMethod "getUpdates" $
                 successfulResponse
@@ -213,7 +213,7 @@ spec
         e <- newEnv
         let _ = (testData :: [(String, String, Int, Int, Int)])
             h =
-              defaultHandleWithHttpHandlers
+              handleWithStubs
                 e
                 [ makeResponseForMethod "getUpdates" . successfulResponse $
                   map makeCallbackQuery testData
@@ -249,7 +249,7 @@ spec
         let chatId = T.ChatId rawChatId
             botResponse = EchoBot.RepliesResponse $ map T.pack strings
             h =
-              defaultHandleWithHttpHandlers
+              handleWithStubs
                 e
                 [ makeResponseForMethod "sendMessage" $
                   successfulResponse A.emptyArray
@@ -264,10 +264,7 @@ spec
       e <- newEnv
       let chatId = T.ChatId 1
           botResponse = EchoBot.RepliesResponse ["text1", "text2"]
-          h =
-            defaultHandleWithHttpHandlers
-              e
-              [makeBadJsonResponseForMethod "sendMessage"]
+          h = handleWithStubs e [makeBadJsonResponseForMethod "sendMessage"]
       T.handleBotResponse h chatId botResponse
       requests <- getRequestsWithMethod e "sendMessage"
       length requests `shouldBe` 2
@@ -277,7 +274,7 @@ spec
       let chatId = T.ChatId 1
           botResponse = EchoBot.RepliesResponse ["text1", "text2"]
           h =
-            defaultHandleWithHttpHandlers
+            handleWithStubs
               e
               [ makeResponseWithStatus400ForMethod "sendMessage" $
                 successfulResponse A.Null
@@ -295,7 +292,7 @@ spec
           title = "Menu title"
           opts = [1, 2]
           h =
-            defaultHandleWithHttpHandlers
+            handleWithStubs
               e
               [ makeResponseForMethod "sendMessage" $
                 successfulResponse A.emptyArray
@@ -324,7 +321,7 @@ spec
           h =
             (defaultHandle e)
               { T.hGetHttpResponse =
-                  httpServerStubWithHandlers
+                  getHttpResponseWithStubs
                     e
                     [ makeResponseForMethod "sendMessage" $
                       successfulResponse $
@@ -369,16 +366,16 @@ newEnv = do
 forgetRequests :: Env -> IO ()
 forgetRequests env = writeIORef (eReverseRequests env) []
 
-defaultHandleWithEmptyGetUpdatesResponseStub :: Env -> T.Handle IO
-defaultHandleWithEmptyGetUpdatesResponseStub env =
-  defaultHandleWithHttpHandlers
+handleWithEmptyGetUpdatesResponseStub :: Env -> T.Handle IO
+handleWithEmptyGetUpdatesResponseStub env =
+  handleWithStubs
     env
     [makeResponseForMethod "getUpdates" $ successfulResponse A.emptyArray]
 
-defaultHandleWithHttpHandlers :: Env -> [HttpRequestHandler] -> T.Handle IO
-defaultHandleWithHttpHandlers env handlers =
+handleWithStubs :: Env -> [HttpRequestHandler] -> T.Handle IO
+handleWithStubs env handlers =
   (defaultHandle env)
-    {T.hGetHttpResponse = httpServerStubWithHandlers env handlers}
+    {T.hGetHttpResponse = getHttpResponseWithStubs env handlers}
 
 defaultHandle :: Env -> T.Handle IO
 defaultHandle env =
@@ -446,14 +443,14 @@ getRequestsWithMethod env apiMethod = filter p <$> getRequests env
 type HttpRequestHandler = T.HttpRequest -> IO (Maybe T.HttpResponse)
 
 -- | A stub implementation of HTTP requesting.
-httpServerStubWithHandlers ::
+getHttpResponseWithStubs ::
      Env
      -- | A list of handlers to be run in order until a response body
      -- is returned.
   -> [HttpRequestHandler]
   -> T.HttpRequest
   -> IO T.HttpResponse
-httpServerStubWithHandlers env handlers request = do
+getHttpResponseWithStubs env handlers request = do
   modifyIORef' (eReverseRequests env) (request :)
   responses <- catMaybes <$> mapM ($ request) handlers
   pure . fromMaybe fatal $ listToMaybe responses
