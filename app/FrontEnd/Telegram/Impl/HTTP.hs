@@ -14,6 +14,7 @@ import qualified FrontEnd.Telegram as T
 import qualified Logger
 import qualified Network.HTTP.Client as HTTP
 import qualified Network.HTTP.Client.TLS as TLS
+import qualified Network.HTTP.Types.Status as HTTP
 import qualified Network.URI as URI
 import qualified Util.FlexibleState as FlexibleState
 
@@ -40,15 +41,21 @@ new logHandle myConfig telegramConfig = do
       , T.hConfig = telegramConfig
       }
 
-getHttpResponse :: HTTP.Manager -> Config -> T.HttpRequest -> IO BS.ByteString
+getHttpResponse :: HTTP.Manager -> Config -> T.HttpRequest -> IO T.HttpResponse
 getHttpResponse httpManager config request = do
   httpRequest <- configureRequest <$> HTTP.requestFromURI uri
-  HTTP.responseBody <$> HTTP.httpLbs httpRequest httpManager
+  response <- HTTP.httpLbs httpRequest httpManager
+  pure
+    T.HttpResponse
+      { T.hrsStatusCode = HTTP.statusCode $ HTTP.responseStatus response
+      , T.hrsStatusText =
+          BS.fromStrict . HTTP.statusMessage $ HTTP.responseStatus response
+      , T.hrsBody = HTTP.responseBody response
+      }
   where
     configureRequest httpRequest =
       httpRequest
-        { HTTP.checkResponse = HTTP.throwErrorStatusCodes
-        , HTTP.method = methodString $ T.hrMethod request
+        { HTTP.method = methodString $ T.hrMethod request
         , HTTP.requestHeaders =
             map (fromString *** fromString) $ T.hrHeaders request
         , HTTP.requestBody = HTTP.RequestBodyLBS $ T.hrBody request

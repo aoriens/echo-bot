@@ -189,6 +189,25 @@ spec
               ]
       events <- T.receiveEvents h
       map snd events `shouldBe` map EchoBot.MessageEvent [correctEntryText]
+    it "should not return events if got non-200 status" $ do
+      e <- newEnv
+      let h =
+            defaultHandleWithHttpHandlers
+              e
+              [ makeResponseWithStatus400ForMethod "getUpdates" $
+                successfulResponse
+                  [ A.object
+                      [ "update_id" .= (1 :: Int)
+                      , "message" .=
+                        A.object
+                          [ "chat" .= A.object ["id" .= (1 :: Int)]
+                          , "text" .= T.pack "message text"
+                          ]
+                      ]
+                  ]
+              ]
+      events <- T.receiveEvents h
+      events `shouldBe` []
     it "should send answerCallbackQuery for each CallbackQuery" $
       property $ \testData -> do
         e <- newEnv
@@ -248,7 +267,21 @@ spec
           h =
             defaultHandleWithHttpHandlers
               e
-              [makeRawResponseForMethod "sendMessage" "BAD_JSON!"]
+              [makeBadJsonResponseForMethod "sendMessage"]
+      T.handleBotResponse h chatId botResponse
+      requests <- getRequestsWithMethod e "sendMessage"
+      length requests `shouldBe` 2
+    it
+      "should do sendMessage if previous sendMessage resulted in non-200 status" $ do
+      e <- newEnv
+      let chatId = T.ChatId 1
+          botResponse = EchoBot.RepliesResponse ["text1", "text2"]
+          h =
+            defaultHandleWithHttpHandlers
+              e
+              [ makeResponseWithStatus400ForMethod "sendMessage" $
+                successfulResponse A.Null
+              ]
       T.handleBotResponse h chatId botResponse
       requests <- getRequestsWithMethod e "sendMessage"
       length requests `shouldBe` 2
@@ -342,8 +375,7 @@ defaultHandleWithEmptyGetUpdatesResponseStub env =
     env
     [makeResponseForMethod "getUpdates" $ successfulResponse A.emptyArray]
 
-defaultHandleWithHttpHandlers ::
-     Env -> [T.HttpRequest -> IO (Maybe BS.ByteString)] -> T.Handle IO
+defaultHandleWithHttpHandlers :: Env -> [HttpRequestHandler] -> T.Handle IO
 defaultHandleWithHttpHandlers env handlers =
   (defaultHandle env)
     {T.hGetHttpResponse = httpServerStubWithHandlers env handlers}
@@ -411,7 +443,7 @@ getRequestsWithMethod env apiMethod = filter p <$> getRequests env
 -- | A function type for calculating a response for some kind of HTTP
 -- requests. It can return Nothing wrapped in the monad to designate
 -- that another handler should be tried to generate a response.
-type HttpRequestHandler = T.HttpRequest -> IO (Maybe BS.ByteString)
+type HttpRequestHandler = T.HttpRequest -> IO (Maybe T.HttpResponse)
 
 -- | A stub implementation of HTTP requesting.
 httpServerStubWithHandlers ::
@@ -420,7 +452,7 @@ httpServerStubWithHandlers ::
      -- is returned.
   -> [HttpRequestHandler]
   -> T.HttpRequest
-  -> IO BS.ByteString
+  -> IO T.HttpResponse
 httpServerStubWithHandlers env handlers request = do
   modifyIORef' (eReverseRequests env) (request :)
   responses <- catMaybes <$> mapM ($ request) handlers
@@ -431,11 +463,36 @@ httpServerStubWithHandlers env handlers request = do
 type ApiMethod = String
 
 makeResponseForMethod :: ApiMethod -> A.Value -> HttpRequestHandler
-makeResponseForMethod method = makeRawResponseForMethod method . A.encode
+makeResponseForMethod method json = makeRawResponseForMethod method response
+  where
+    response =
+      T.HttpResponse
+        { T.hrsBody = A.encode json
+        , T.hrsStatusCode = 200
+        , T.hrsStatusText = "OK"
+        }
 
-makeRawResponseForMethod :: ApiMethod -> BS.ByteString -> HttpRequestHandler
-makeRawResponseForMethod method body request =
+makeResponseWithStatus400ForMethod :: ApiMethod -> A.Value -> HttpRequestHandler
+makeResponseWithStatus400ForMethod method json =
+  makeRawResponseForMethod method response
+  where
+    response =
+      T.HttpResponse
+        { T.hrsBody = A.encode json
+        , T.hrsStatusCode = 400
+        , T.hrsStatusText = "Bad request"
+        }
+
+makeBadJsonResponseForMethod :: ApiMethod -> HttpRequestHandler
+makeBadJsonResponseForMethod method =
+  makeRawResponseForMethod
+    method
+    T.HttpResponse
+      {T.hrsBody = "BAD_JSON!", T.hrsStatusCode = 200, T.hrsStatusText = "OK"}
+
+makeRawResponseForMethod :: ApiMethod -> T.HttpResponse -> HttpRequestHandler
+makeRawResponseForMethod method response request =
   pure $
   if uriWithMethod method == T.hrURI request
-    then Just body
+    then Just response
     else Nothing

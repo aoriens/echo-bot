@@ -18,6 +18,7 @@ module FrontEnd.Telegram
   , ChatId(..)
   , HttpRequest(..)
   , HttpMethod(..)
+  , HttpResponse(..)
   ) where
 
 import Control.Applicative
@@ -63,7 +64,7 @@ data Config =
 data Handle m =
   Handle
     { hLogHandle :: Logger.Handle m
-    , hGetHttpResponse :: HttpRequest -> m BS.ByteString
+    , hGetHttpResponse :: HttpRequest -> m HttpResponse
     , hStateHandle :: FlexibleState.Handle State m
     , hConfig :: Config
     }
@@ -101,8 +102,17 @@ data HttpMethod =
   POST
   deriving (Show)
 
-newtype RequestError =
-  JSONError String
+data HttpResponse =
+  HttpResponse
+    { hrsStatusCode :: Int
+    , hrsStatusText :: BS.ByteString
+    , hrsBody :: BS.ByteString
+    }
+  deriving (Show)
+
+data RequestError
+  = JSONError String
+  | HttpStatusError Int BS.ByteString
   deriving (Show)
 
 type Failable = Either RequestError
@@ -324,8 +334,12 @@ getResponseWithMethodAndRequestModifier h method request httpRequestModifier par
           , hrAdditionalResponseTimeout = 0
           }
     decodeResponse response =
-      either (Left . JSONError) Right $
-      A.parseEither parser =<< A.eitherDecode response
+      if not . responseStatusIsOk $ hrsStatusCode response
+        then Left $
+             HttpStatusError (hrsStatusCode response) (hrsStatusText response)
+        else either (Left . JSONError) Right $
+             A.parseEither parser =<< A.eitherDecode (hrsBody response)
+    responseStatusIsOk code = code >= 200 && code < 300
     logResult (Left e) = Logger.error h $ "Response error: " .< e
     logResult _ = pure ()
 
