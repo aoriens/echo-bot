@@ -144,20 +144,11 @@ spec
                 , entryWithoutMessage
                 , entryWithoutChatId
                 , entryWithNonStringText
-                , correctEntry
+                , messageUpdateObjectWithText correctEntryText
                 , entryWithoutText
                 ]
               ]
-          correctEntry =
-            A.object
-              [ "update_id" .= (1 :: Int)
-              , "message" .=
-                A.object
-                  [ "chat" .= A.object ["id" .= (1 :: Int)]
-                  , "text" .= correctEntryText
-                  ]
-              ]
-          correctEntryText = ("correctText" :: T.Text)
+          correctEntryText = "correctText"
           entryWithoutId =
             A.object
               [ "message" .=
@@ -195,16 +186,17 @@ spec
             handleWithStubs
               e
               [ makeResponseWithStatus400ForMethod "getUpdates" $
-                successfulResponse
-                  [ A.object
-                      [ "update_id" .= (1 :: Int)
-                      , "message" .=
-                        A.object
-                          [ "chat" .= A.object ["id" .= (1 :: Int)]
-                          , "text" .= T.pack "message text"
-                          ]
-                      ]
-                  ]
+                successfulResponse [messageUpdateObject]
+              ]
+      events <- T.receiveEvents h
+      events `shouldBe` []
+    it "should not return events if got response with ok = False" $ do
+      e <- newEnv
+      let h =
+            handleWithStubs
+              e
+              [ makeResponseForMethod "getUpdates" $
+                A.object ["ok" .= False, "result" .= [messageUpdateObject]]
               ]
       events <- T.receiveEvents h
       events `shouldBe` []
@@ -427,7 +419,18 @@ bodies :: [T.HttpRequest] -> [A.Object]
 bodies = map $ decodeJsonObject . T.hrBody
 
 successfulResponse :: (A.ToJSON a) => a -> A.Value
-successfulResponse payload = A.object ["result" .= payload]
+successfulResponse payload = A.object ["ok" .= True, "result" .= payload]
+
+messageUpdateObject :: A.Value
+messageUpdateObject = messageUpdateObjectWithText "some text"
+
+messageUpdateObjectWithText :: T.Text -> A.Value
+messageUpdateObjectWithText text =
+  A.object
+    [ "update_id" .= (1 :: Int)
+    , "message" .=
+      A.object ["chat" .= A.object ["id" .= (1 :: Int)], "text" .= text]
+    ]
 
 getRequests :: Env -> IO [T.HttpRequest]
 getRequests env = reverse <$> readIORef (eReverseRequests env)

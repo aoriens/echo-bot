@@ -27,9 +27,10 @@ import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Maybe
 import qualified Data.Aeson as A
-import Data.Aeson ((.:), (.=))
+import Data.Aeson ((.:), (.:?), (.=))
 import qualified Data.Aeson.Types as A
 import qualified Data.ByteString.Lazy as BS
+import Data.Foldable
 import qualified Data.IntMap.Strict as IntMap
 import Data.IntMap.Strict (IntMap)
 import Data.Maybe
@@ -113,6 +114,7 @@ data HttpResponse =
 data RequestError
   = JSONError String
   | HttpStatusError Int BS.ByteString
+  | ApiError Text
   deriving (Show)
 
 type Failable = Either RequestError
@@ -280,7 +282,7 @@ sendMessageWithInlineKeyboard h chatId title opts =
         ]
     makeButton (callbackData, text) =
       A.object ["callback_data" .= callbackData, "text" .= text]
-    parseMessageId = withSuccessfulResponse (.: "message_id")
+    parseMessageId = A.withObject "result" (.: "message_id")
 
 sendAnswerCallbackQueryRequest ::
      Monad m => Handle m -> CallbackQueryId -> m (Failable ())
@@ -333,14 +335,21 @@ getResponseWithMethodAndRequestModifier h method request httpRequestModifier par
           , hrBody = A.encode request
           , hrAdditionalResponseTimeout = 0
           }
-    decodeResponse response =
-      if not . responseStatusIsOk $ hrsStatusCode response
-        then Left $
-             HttpStatusError (hrsStatusCode response) (hrsStatusText response)
-        else either (Left . JSONError) Right $
-             A.parseEither parser =<< A.eitherDecode (hrsBody response)
+    decodeResponse response
+      | responseStatusIsOk (hrsStatusCode response) =
+        decodeBody (hrsBody response)
+      | otherwise =
+        Left $ HttpStatusError (hrsStatusCode response) (hrsStatusText response)
     responseStatusIsOk code = code >= 200 && code < 300
-    logResult (Left e) = Logger.error h $ "Response error: " .< e
+    decodeBody body =
+      case A.eitherDecode body of
+        Left e -> Left $ JSONError e
+        Right (ErrorResponse desc) -> Left $ ApiError desc
+        Right (ResultResponse value) ->
+          either (Left . JSONError) Right $ A.parseEither parser value
+    logResult (Left e) =
+      Logger.error h $
+      "'" <> T.pack (apiMethodName method) <> "' returned error: " .< e
     logResult _ = pure ()
 
 executeMethod ::
@@ -368,9 +377,9 @@ instance Monad m => FlexibleState.Class (Handle m) State m where
 
 parseUpdatesResponse :: A.Value -> A.Parser (Maybe UpdateId, [Event])
 parseUpdatesResponse =
-  withSuccessfulResponse $
+  A.withArray "result" $
   fmap ((safeMaximum *** catMaybes) . unzip . catMaybes) .
-  mapM (optional . parseUpdate)
+  mapM (optional . parseUpdate) . toList
   where
     safeMaximum = fmap getMax . foldMap (Just . Max)
     parseUpdate =
@@ -381,10 +390,17 @@ parseUpdatesResponse =
       (MenuChoiceEvent <$> update .: "callback_query") <|>
       fail "unsupported kind of 'Update' object"
 
-withSuccessfulResponse ::
-     (A.FromJSON a) => (a -> A.Parser b) -> A.Value -> A.Parser b
-withSuccessfulResponse parser =
-  A.withObject "response" $ \r -> parser =<< r .: "result"
+data ApiResponse
+  = ErrorResponse Text
+  | ResultResponse A.Value
+
+instance A.FromJSON ApiResponse where
+  parseJSON =
+    A.withObject "response" $ \r -> do
+      ok <- r .: "ok"
+      if ok
+        then ResultResponse <$> r .: "result"
+        else ErrorResponse . fromMaybe "" <$> r .:? "description"
 
 -- | An event that can occur in the chat, caused by the user.
 data Event
@@ -454,7 +470,9 @@ newtype CallbackData =
   deriving (Eq, Show, A.FromJSON, A.ToJSON)
 
 newtype ApiMethod =
-  ApiMethod String
+  ApiMethod
+    { apiMethodName :: String
+    }
   deriving (Show)
 
 whenJust :: (Applicative m) => Maybe a -> (a -> m ()) -> m ()
