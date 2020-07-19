@@ -1,4 +1,5 @@
-{-# LANGUAGE OverloadedStrings, TupleSections #-}
+{-# LANGUAGE OverloadedStrings, TupleSections,
+  GeneralizedNewtypeDeriving #-}
 
 module FrontEnd.TelegramSpec
   ( spec
@@ -11,6 +12,7 @@ import qualified Data.Aeson.Types as A
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.HashMap.Strict as HM
 import Data.IORef
+import Data.Ix
 import Data.Maybe
 import qualified Data.Text as T
 import qualified EchoBot
@@ -22,18 +24,20 @@ import Test.QuickCheck
 import qualified Util.FlexibleState as FlexibleState
 
 spec :: Spec
-spec = do
+spec
+  {- HLINT ignore spec "Reduce duplication" -}
+ = do
   describe "receiveEvents" $ do
     it "should send getUpdates as the first request" $ do
       e <- newEnv
-      let h = defaultHandleWithEmptyGetUpdatesResponseStub e
+      let h = handleWithEmptyGetUpdatesResponseStub e
       void $ T.receiveEvents h
       (request:_) <- getRequests e
       T.hrURI request `shouldBe` uriWithMethod "getUpdates"
     prop "should send configured timeout in getUpdates" $ \(NonNegative timeout) -> do
       e <- newEnv
       let h =
-            (defaultHandleWithEmptyGetUpdatesResponseStub e)
+            (handleWithEmptyGetUpdatesResponseStub e)
               {T.hConfig = defaultConfig {T.confPollTimeout = timeout}}
       void $ T.receiveEvents h
       (body:_) <- bodies <$> getRequests e
@@ -41,7 +45,7 @@ spec = do
     it "should have first getUpdates request with zero offset or no offset" $ do
       e <- newEnv
       let zero = A.toJSON (0 :: Int)
-      let h = defaultHandleWithEmptyGetUpdatesResponseStub e
+      let h = handleWithEmptyGetUpdatesResponseStub e
       void $ T.receiveEvents h
       (body:_) <- bodies <$> getRequestsWithMethod e "getUpdates"
       HM.lookupDefault zero "offset" body `shouldBe` zero
@@ -52,7 +56,7 @@ spec = do
         e <- newEnv
         let _ = (id1 :: Int, id2 :: Int)
             h1 =
-              defaultHandleWithHttpHandlers
+              handleWithStubs
                 e
                 [ makeResponseForMethod "getUpdates" $
                   successfulResponse
@@ -60,14 +64,14 @@ spec = do
                     , A.object ["update_id" .= id2]
                     ]
                 ]
-            h2 = defaultHandleWithEmptyGetUpdatesResponseStub e
+            h2 = handleWithEmptyGetUpdatesResponseStub e
         void $ T.receiveEvents h1
         void $ T.receiveEvents h2
         (_:body:_) <- bodies <$> getRequestsWithMethod e "getUpdates"
         HM.lookup "offset" body `shouldBe` Just (A.toJSON $ max id1 id2 + 1)
     it "should send exactly one getUpdates" $ do
       e <- newEnv
-      let h = defaultHandleWithEmptyGetUpdatesResponseStub e
+      let h = handleWithEmptyGetUpdatesResponseStub e
       void $ T.receiveEvents h
       requests <- getRequestsWithMethod e "getUpdates"
       length requests `shouldBe` 1
@@ -78,13 +82,13 @@ spec = do
         e <- newEnv
         let _ = updateId :: Int
             h1 =
-              defaultHandleWithHttpHandlers
+              handleWithStubs
                 e
                 [ makeResponseForMethod "getUpdates" $
                   successfulResponse [A.object ["update_id" .= updateId]]
                 ]
-            h2 = defaultHandleWithEmptyGetUpdatesResponseStub e
-            h3 = defaultHandleWithEmptyGetUpdatesResponseStub e
+            h2 = handleWithEmptyGetUpdatesResponseStub e
+            h3 = handleWithEmptyGetUpdatesResponseStub e
         void $ T.receiveEvents h1
         void $ T.receiveEvents h2
         forgetRequests e
@@ -105,11 +109,10 @@ spec = do
                     ]
                 ]
             h =
-              defaultHandleWithHttpHandlers
+              handleWithStubs
                 e
-                [ makeResponseForMethod "getUpdates" .
-                  successfulResponse . map (uncurry makeUpdate) $
-                  zip [(1 :: Int) ..] texts
+                [ makeResponseForMethod "getUpdates" . successfulResponse $
+                  zipWith makeUpdate [(1 :: Int) ..] texts
                 ]
         events <- T.receiveEvents h
         map snd events `shouldBe` map (EchoBot.MessageEvent . T.pack) texts
@@ -118,7 +121,7 @@ spec = do
         e <- newEnv
         let expectedChatId = T.ChatId rawChatId
             h =
-              defaultHandleWithHttpHandlers
+              handleWithStubs
                 e
                 [ makeResponseForMethod "getUpdates" . successfulResponse $
                   [ A.object
@@ -133,12 +136,130 @@ spec = do
                 ]
         (chatId, _) <- head <$> T.receiveEvents h
         chatId `shouldBe` expectedChatId
+    it "should ignore malformed updates and return well-formed MessageEvents" $ do
+      e <- newEnv
+      let h =
+            handleWithStubs
+              e
+              [ makeResponseForMethod "getUpdates" . successfulResponse $
+                [ entryWithoutId
+                , entryWithoutMessage
+                , entryWithoutChatId
+                , entryWithNonStringText
+                , messageUpdateObjectWithText correctEntryText
+                , entryWithoutText
+                ]
+              ]
+          correctEntryText = "correctText"
+          entryWithoutId =
+            A.object
+              [ "message" .=
+                A.object
+                  [ "chat" .= A.object ["id" .= (1 :: Int)]
+                  , "text" .= ("text" :: String)
+                  ]
+              ]
+          entryWithoutMessage = A.object ["update_id" .= (2 :: Int)]
+          entryWithoutChatId =
+            A.object
+              [ "update_id" .= (1 :: Int)
+              , "message" .=
+                A.object ["chat" .= A.object [], "text" .= correctEntryText]
+              ]
+          entryWithNonStringText =
+            A.object
+              [ "update_id" .= (1 :: Int)
+              , "message" .=
+                A.object
+                  [ "chat" .= A.object ["id" .= (1 :: Int)]
+                  , "text" .= (2222 :: Int)
+                  ]
+              ]
+          entryWithoutText =
+            A.object
+              [ "update_id" .= (1 :: Int)
+              , "message" .= A.object ["chat" .= A.object ["id" .= (1 :: Int)]]
+              ]
+      events <- T.receiveEvents h
+      map snd events `shouldBe` map EchoBot.MessageEvent [correctEntryText]
+    it "should not return events if got HTTP status 5xx" $
+      property $ \(HttpStatusCode status) ->
+        inRange (500, 599) status ==> do
+          e <- newEnv
+          let h =
+                handleWithStubs
+                  e
+                  [ makeResponseWithStatusForMethod "getUpdates" status $
+                    successfulResponse [messageUpdateObject]
+                  ]
+          T.receiveEvents h `shouldReturn` []
+    it "should crash if got non (5xx, 2xx) HTTP status" $
+      property $ \(HttpStatusCode status) ->
+        inRange (100, 199) status ||
+        inRange (300, 499) status ==> do
+          e <- newEnv
+          let h =
+                handleWithStubs
+                  e
+                  [ makeResponseWithStatusForMethod "getUpdates" status $
+                    successfulResponse [messageUpdateObject]
+                  ]
+          T.receiveEvents h `shouldThrow` anyErrorCall
+    it "should not return events if got response with ok = False" $ do
+      e <- newEnv
+      let h =
+            handleWithStubs
+              e
+              [ makeResponseForMethod "getUpdates" $
+                A.object ["ok" .= False, "result" .= [messageUpdateObject]]
+              ]
+      T.receiveEvents h `shouldReturn` []
+    it "should not return events if got IO error" $ do
+      e <- newEnv
+      let h =
+            handleWithStubs
+              e
+              [ makeRawResponseForMethod
+                  "getUpdates"
+                  (Left (T.HttpError "some exception"))
+              ]
+      T.receiveEvents h `shouldReturn` []
+    it "should wait before next getUpdate if last one failed" $ do
+      e <- newEnv
+      let h =
+            handleWithStubs
+              e
+              [ makeRawResponseForMethod
+                  "getUpdates"
+                  (Left (T.HttpError "some exception"))
+              ]
+      void $ T.receiveEvents h
+      void $ T.receiveEvents h
+      events <-
+        take 3 .
+        filter (\ev -> isRequestWithMethod "getUpdates" ev || isPause ev) <$>
+        getEvents e
+      length events `shouldBe` 3
+      head events `shouldSatisfy` isRequestWithMethod "getUpdates"
+      events !! 1 `shouldSatisfy` isPause
+      events !! 2 `shouldSatisfy` isRequestWithMethod "getUpdates"
+    it "should not wait before next getUpdate if last one succeeded" $ do
+      e <- newEnv
+      let h = handleWithEmptyGetUpdatesResponseStub e
+      void $ T.receiveEvents h
+      void $ T.receiveEvents h
+      events <-
+        take 2 .
+        filter (\ev -> isRequestWithMethod "getUpdates" ev || isPause ev) <$>
+        getEvents e
+      length events `shouldBe` 2
+      events `shouldSatisfy` all (isRequestWithMethod "getUpdates")
     it "should send answerCallbackQuery for each CallbackQuery" $
       property $ \testData -> do
         e <- newEnv
         let _ = (testData :: [(String, String, Int, Int, Int)])
             h =
-              defaultHandleWithHttpHandlers
+              handleWithStubs
                 e
                 [ makeResponseForMethod "getUpdates" . successfulResponse $
                   map makeCallbackQuery testData
@@ -174,7 +295,7 @@ spec = do
         let chatId = T.ChatId rawChatId
             botResponse = EchoBot.RepliesResponse $ map T.pack strings
             h =
-              defaultHandleWithHttpHandlers
+              handleWithStubs
                 e
                 [ makeResponseForMethod "sendMessage" $
                   successfulResponse A.emptyArray
@@ -185,6 +306,44 @@ spec = do
         map (HM.lookup "chat_id") rBodies `shouldSatisfy`
           all (Just (A.toJSON rawChatId) ==)
     it
+      "should do sendMessage if previous sendMessage resulted in malformed response" $ do
+      e <- newEnv
+      let chatId = T.ChatId 1
+          botResponse = EchoBot.RepliesResponse ["text1", "text2"]
+          h = handleWithStubs e [makeBadJsonResponseForMethod "sendMessage"]
+      T.handleBotResponse h chatId botResponse
+      requests <- getRequestsWithMethod e "sendMessage"
+      length requests `shouldBe` 2
+    it "should do sendMessage if previous sendMessage resulted in status 5xx" $
+      property $ \(HttpStatusCode status) ->
+        inRange (500, 599) status ==> do
+          e <- newEnv
+          let chatId = T.ChatId 1
+              botResponse = EchoBot.RepliesResponse ["text1", "text2"]
+              h =
+                handleWithStubs
+                  e
+                  [ makeResponseWithStatusForMethod "sendMessage" status $
+                    successfulResponse A.Null
+                  ]
+          T.handleBotResponse h chatId botResponse
+          requests <- getRequestsWithMethod e "sendMessage"
+          length requests `shouldBe` 2
+    it "should do sendMessage if previous sendMessage failed with IO error" $ do
+      e <- newEnv
+      let chatId = T.ChatId 1
+          botResponse = EchoBot.RepliesResponse ["text1", "text2"]
+          h =
+            handleWithStubs
+              e
+              [ makeRawResponseForMethod
+                  "sendMessage"
+                  (Left (T.HttpError "some error"))
+              ]
+      T.handleBotResponse h chatId botResponse
+      requests <- getRequestsWithMethod e "sendMessage"
+      length requests `shouldBe` 2
+    it
       "should send a message with the menu title and an inline keyboard \
       \for menu response" $ do
       e <- newEnv
@@ -194,7 +353,7 @@ spec = do
           title = "Menu title"
           opts = [1, 2]
           h =
-            defaultHandleWithHttpHandlers
+            handleWithStubs
               e
               [ makeResponseForMethod "sendMessage" $
                 successfulResponse A.emptyArray
@@ -223,7 +382,7 @@ spec = do
           h =
             (defaultHandle e)
               { T.hGetHttpResponse =
-                  httpServerStubWithHandlers
+                  getHttpResponseWithStubs
                     e
                     [ makeResponseForMethod "sendMessage" $
                       successfulResponse $
@@ -249,36 +408,33 @@ spec = do
 data Env =
   Env
     { eState :: IORef T.State
-    , eReverseRequests :: IORef [T.HttpRequest]
-    , eReverseLogEntries :: IORef [(Logger.Level, T.Text)]
+    , eReverseEvents :: IORef [Event]
     }
+
+data Event
+  = ARequestEvent T.HttpRequest
+  | PauseEvent
+  deriving (Show)
 
 newEnv :: IO Env
 newEnv = do
   state <- newIORef T.makeState
   requests <- newIORef []
-  logEntries <- newIORef []
-  pure
-    Env
-      { eState = state
-      , eReverseRequests = requests
-      , eReverseLogEntries = logEntries
-      }
+  pure Env {eState = state, eReverseEvents = requests}
 
 forgetRequests :: Env -> IO ()
-forgetRequests env = writeIORef (eReverseRequests env) []
+forgetRequests env = writeIORef (eReverseEvents env) []
 
-defaultHandleWithEmptyGetUpdatesResponseStub :: Env -> T.Handle IO
-defaultHandleWithEmptyGetUpdatesResponseStub env =
-  defaultHandleWithHttpHandlers
+handleWithEmptyGetUpdatesResponseStub :: Env -> T.Handle IO
+handleWithEmptyGetUpdatesResponseStub env =
+  handleWithStubs
     env
     [makeResponseForMethod "getUpdates" $ successfulResponse A.emptyArray]
 
-defaultHandleWithHttpHandlers ::
-     Env -> [T.HttpRequest -> IO (Maybe A.Value)] -> T.Handle IO
-defaultHandleWithHttpHandlers env handlers =
+handleWithStubs :: Env -> [HttpRequestHandler] -> T.Handle IO
+handleWithStubs env handlers =
   (defaultHandle env)
-    {T.hGetHttpResponse = httpServerStubWithHandlers env handlers}
+    {T.hGetHttpResponse = getHttpResponseWithStubs env handlers}
 
 defaultHandle :: Env -> T.Handle IO
 defaultHandle env =
@@ -287,6 +443,8 @@ defaultHandle env =
     , T.hGetHttpResponse =
         \request ->
           pure $ error ("No response provided for request: " ++ show request)
+    , T.hPauseAfterFailedGettingUpdates =
+        modifyIORef' (eReverseEvents env) (PauseEvent :)
     , T.hStateHandle =
         FlexibleState.Handle
           { FlexibleState.hGet = readIORef $ eState env
@@ -311,13 +469,7 @@ defaultURLPrefix :: String
 defaultURLPrefix = "example.com"
 
 logHandle :: Env -> Logger.Handle IO
-logHandle env =
-  Logger.Handle
-    { Logger.hLowLevelLog =
-        \level _ text ->
-          when (level >= Logger.Warning) $
-          modifyIORef' (eReverseLogEntries env) ((level, text) :)
-    }
+logHandle _ = Logger.Handle {Logger.hLowLevelLog = \_ _ _ -> pure ()}
 
 uriWithMethod :: String -> String
 uriWithMethod method =
@@ -330,42 +482,110 @@ bodies :: [T.HttpRequest] -> [A.Object]
 bodies = map $ decodeJsonObject . T.hrBody
 
 successfulResponse :: (A.ToJSON a) => a -> A.Value
-successfulResponse payload = A.object ["result" .= payload]
+successfulResponse payload = A.object ["ok" .= True, "result" .= payload]
+
+messageUpdateObject :: A.Value
+messageUpdateObject = messageUpdateObjectWithText "some text"
+
+messageUpdateObjectWithText :: T.Text -> A.Value
+messageUpdateObjectWithText text =
+  A.object
+    [ "update_id" .= (1 :: Int)
+    , "message" .=
+      A.object ["chat" .= A.object ["id" .= (1 :: Int)], "text" .= text]
+    ]
+
+getEvents :: Env -> IO [Event]
+getEvents env = reverse <$> readIORef (eReverseEvents env)
 
 getRequests :: Env -> IO [T.HttpRequest]
-getRequests env = reverse <$> readIORef (eReverseRequests env)
+getRequests = fmap (mapMaybe f) . getEvents
+  where
+    f (ARequestEvent request) = Just request
+    f _ = Nothing
 
 getRequestsWithMethod :: Env -> String -> IO [T.HttpRequest]
 getRequestsWithMethod env apiMethod = filter p <$> getRequests env
   where
     p = (uriWithMethod apiMethod ==) . T.hrURI
 
+isRequestWithMethod :: String -> Event -> Bool
+isRequestWithMethod method (ARequestEvent request) =
+  uriWithMethod method == T.hrURI request
+isRequestWithMethod _ _ = False
+
+isPause :: Event -> Bool
+isPause PauseEvent = True
+isPause _ = False
+
 -- | A function type for calculating a response for some kind of HTTP
--- requests. It has partial type, so that it can return Nothing
--- wrapped in the monad to designate that another handler should be
--- tried to generate a response.
-type HttpRequestHandler = T.HttpRequest -> IO (Maybe A.Value)
+-- requests. It can return Nothing wrapped in the monad to designate
+-- that another handler should be tried to generate a response.
+type HttpRequestHandler = T.HttpRequest -> IO (Maybe T.HttpResult)
 
 -- | A stub implementation of HTTP requesting.
-httpServerStubWithHandlers ::
+getHttpResponseWithStubs ::
      Env
      -- | A list of handlers to be run in order until a response body
      -- is returned.
   -> [HttpRequestHandler]
   -> T.HttpRequest
-  -> IO BS.ByteString
-httpServerStubWithHandlers env handlers request = do
-  modifyIORef' (eReverseRequests env) (request :)
+  -> IO T.HttpResult
+getHttpResponseWithStubs env handlers request = do
+  modifyIORef' (eReverseEvents env) (ARequestEvent request :)
   responses <- catMaybes <$> mapM ($ request) handlers
-  pure . maybe fatal A.encode $ listToMaybe responses
+  pure . fromMaybe fatal $ listToMaybe responses
   where
     fatal = error $ "No response stub provided for request: " ++ show request
 
 type ApiMethod = String
 
 makeResponseForMethod :: ApiMethod -> A.Value -> HttpRequestHandler
-makeResponseForMethod method response request =
+makeResponseForMethod method json =
+  makeRawResponseForMethod method $ Right response
+  where
+    response =
+      T.HttpResponse
+        { T.hrsBody = A.encode json
+        , T.hrsStatusCode = 200
+        , T.hrsStatusText = "OK"
+        }
+
+makeResponseWithStatusForMethod ::
+     ApiMethod -> Int -> A.Value -> HttpRequestHandler
+makeResponseWithStatusForMethod method statusCode json =
+  makeRawResponseForMethod method $ Right response
+  where
+    response =
+      T.HttpResponse
+        { T.hrsBody = A.encode json
+        , T.hrsStatusCode = statusCode
+        , T.hrsStatusText = "Status line"
+        }
+
+makeBadJsonResponseForMethod :: ApiMethod -> HttpRequestHandler
+makeBadJsonResponseForMethod method =
+  makeRawResponseForMethod method $
+  Right
+    T.HttpResponse
+      {T.hrsBody = "BAD_JSON!", T.hrsStatusCode = 200, T.hrsStatusText = "OK"}
+
+makeRawResponseForMethod :: ApiMethod -> T.HttpResult -> HttpRequestHandler
+makeRawResponseForMethod method result request =
   pure $
   if uriWithMethod method == T.hrURI request
-    then Just response
+    then Just result
     else Nothing
+
+newtype HttpStatusCode =
+  HttpStatusCode Int
+  deriving (Eq, Ord, Num, Real, Enum, Integral, Show)
+
+instance Bounded HttpStatusCode where
+  minBound = HttpStatusCode 100
+  maxBound = HttpStatusCode 599
+
+instance Arbitrary HttpStatusCode where
+  arbitrary = arbitraryBoundedIntegral
+  shrink (HttpStatusCode code) =
+    [HttpStatusCode z | z <- [code `div` 100 * 100], z /= code]

@@ -61,6 +61,7 @@ executable echo-bot-exe
     , filepath
     , http-client
     , http-client-tls
+    , http-types
     , mtl
     , network-uri
     , text
