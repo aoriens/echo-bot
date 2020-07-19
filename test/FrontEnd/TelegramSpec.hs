@@ -192,8 +192,7 @@ spec
                   [ makeResponseWithStatusForMethod "getUpdates" status $
                     successfulResponse [messageUpdateObject]
                   ]
-          events <- T.receiveEvents h
-          events `shouldBe` []
+          T.receiveEvents h `shouldReturn` []
     it "should crash if got non (5xx, 2xx) HTTP status" $
       property $ \(HttpStatusCode status) ->
         inRange (100, 199) status ||
@@ -214,8 +213,7 @@ spec
               [ makeResponseForMethod "getUpdates" $
                 A.object ["ok" .= False, "result" .= [messageUpdateObject]]
               ]
-      events <- T.receiveEvents h
-      events `shouldBe` []
+      T.receiveEvents h `shouldReturn` []
     it "should not return events if got IO error" $ do
       e <- newEnv
       let h =
@@ -225,8 +223,7 @@ spec
                   "getUpdates"
                   (Left (T.HttpError "some exception"))
               ]
-      events <- T.receiveEvents h
-      events `shouldBe` []
+      T.receiveEvents h `shouldReturn` []
     it "should send answerCallbackQuery for each CallbackQuery" $
       property $ \testData -> do
         e <- newEnv
