@@ -379,20 +379,13 @@ data Env =
   Env
     { eState :: IORef T.State
     , eReverseRequests :: IORef [T.HttpRequest]
-    , eReverseLogEntries :: IORef [(Logger.Level, T.Text)]
     }
 
 newEnv :: IO Env
 newEnv = do
   state <- newIORef T.makeState
   requests <- newIORef []
-  logEntries <- newIORef []
-  pure
-    Env
-      { eState = state
-      , eReverseRequests = requests
-      , eReverseLogEntries = logEntries
-      }
+  pure Env {eState = state, eReverseRequests = requests}
 
 forgetRequests :: Env -> IO ()
 forgetRequests env = writeIORef (eReverseRequests env) []
@@ -439,13 +432,7 @@ defaultURLPrefix :: String
 defaultURLPrefix = "example.com"
 
 logHandle :: Env -> Logger.Handle IO
-logHandle env =
-  Logger.Handle
-    { Logger.hLowLevelLog =
-        \level _ text ->
-          when (level >= Logger.Warning) $
-          modifyIORef' (eReverseLogEntries env) ((level, text) :)
-    }
+logHandle _ = Logger.Handle {Logger.hLowLevelLog = \_ _ _ -> pure ()}
 
 uriWithMethod :: String -> String
 uriWithMethod method =
