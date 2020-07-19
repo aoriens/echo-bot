@@ -180,16 +180,25 @@ spec
               ]
       events <- T.receiveEvents h
       map snd events `shouldBe` map EchoBot.MessageEvent [correctEntryText]
-    it "should not return events if got non-200 status" $ do
+    it "should not return events if got HTTP status 5xx" $ do
       e <- newEnv
       let h =
             handleWithStubs
               e
-              [ makeResponseWithStatus400ForMethod "getUpdates" $
+              [ makeResponseWithStatusForMethod "getUpdates" 500 $
                 successfulResponse [messageUpdateObject]
               ]
       events <- T.receiveEvents h
       events `shouldBe` []
+    it "should crash if got HTTP status 4xx" $ do
+      e <- newEnv
+      let h =
+            handleWithStubs
+              e
+              [ makeResponseWithStatusForMethod "getUpdates" 400 $
+                successfulResponse [messageUpdateObject]
+              ]
+      T.receiveEvents h `shouldThrow` anyErrorCall
     it "should not return events if got response with ok = False" $ do
       e <- newEnv
       let h =
@@ -271,15 +280,14 @@ spec
       T.handleBotResponse h chatId botResponse
       requests <- getRequestsWithMethod e "sendMessage"
       length requests `shouldBe` 2
-    it
-      "should do sendMessage if previous sendMessage resulted in non-200 status" $ do
+    it "should do sendMessage if previous sendMessage resulted in status 5xx" $ do
       e <- newEnv
       let chatId = T.ChatId 1
           botResponse = EchoBot.RepliesResponse ["text1", "text2"]
           h =
             handleWithStubs
               e
-              [ makeResponseWithStatus400ForMethod "sendMessage" $
+              [ makeResponseWithStatusForMethod "sendMessage" 500 $
                 successfulResponse A.Null
               ]
       T.handleBotResponse h chatId botResponse
@@ -498,15 +506,16 @@ makeResponseForMethod method json =
         , T.hrsStatusText = "OK"
         }
 
-makeResponseWithStatus400ForMethod :: ApiMethod -> A.Value -> HttpRequestHandler
-makeResponseWithStatus400ForMethod method json =
+makeResponseWithStatusForMethod ::
+     ApiMethod -> Int -> A.Value -> HttpRequestHandler
+makeResponseWithStatusForMethod method statusCode json =
   makeRawResponseForMethod method $ Right response
   where
     response =
       T.HttpResponse
         { T.hrsBody = A.encode json
-        , T.hrsStatusCode = 400
-        , T.hrsStatusText = "Bad request"
+        , T.hrsStatusCode = statusCode
+        , T.hrsStatusText = "Status line"
         }
 
 makeBadJsonResponseForMethod :: ApiMethod -> HttpRequestHandler

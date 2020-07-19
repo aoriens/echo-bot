@@ -35,6 +35,7 @@ import qualified Data.ByteString.Lazy as BS
 import Data.Foldable
 import qualified Data.IntMap.Strict as IntMap
 import Data.IntMap.Strict (IntMap)
+import Data.Ix
 import Data.Maybe
 import Data.Semigroup
 import Data.Text (Text)
@@ -345,12 +346,12 @@ getResponseWithMethodAndRequestModifier h method request httpRequestModifier par
           , hrAdditionalResponseTimeout = 0
           }
     decodeHttpResult (Left (HttpError e)) = Left $ IOError e
-    decodeHttpResult (Right response)
-      | responseStatusIsOk (hrsStatusCode response) =
-        decodeBody (hrsBody response)
-      | otherwise =
-        Left $ HttpStatusError (hrsStatusCode response) (hrsStatusText response)
-    responseStatusIsOk code = code >= 200 && code < 300
+    decodeHttpResult (Right response@HttpResponse {hrsStatusCode = status})
+      | inRange (200, 299) status = decodeBody $ hrsBody response
+      | inRange (400, 499) status =
+        error $
+        "Method '" ++ apiMethodName method ++ "' returned " ++ show response
+      | otherwise = Left $ HttpStatusError status (hrsStatusText response)
     decodeBody body =
       case A.eitherDecode body of
         Left e -> Left $ JSONError e
