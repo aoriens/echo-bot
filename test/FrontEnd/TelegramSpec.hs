@@ -1,4 +1,5 @@
-{-# LANGUAGE OverloadedStrings, TupleSections #-}
+{-# LANGUAGE OverloadedStrings, TupleSections,
+  GeneralizedNewtypeDeriving #-}
 
 module FrontEnd.TelegramSpec
   ( spec
@@ -11,6 +12,7 @@ import qualified Data.Aeson.Types as A
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.HashMap.Strict as HM
 import Data.IORef
+import Data.Ix
 import Data.Maybe
 import qualified Data.Text as T
 import qualified EchoBot
@@ -180,25 +182,30 @@ spec
               ]
       events <- T.receiveEvents h
       map snd events `shouldBe` map EchoBot.MessageEvent [correctEntryText]
-    it "should not return events if got HTTP status 5xx" $ do
-      e <- newEnv
-      let h =
-            handleWithStubs
-              e
-              [ makeResponseWithStatusForMethod "getUpdates" 500 $
-                successfulResponse [messageUpdateObject]
-              ]
-      events <- T.receiveEvents h
-      events `shouldBe` []
-    it "should crash if got HTTP status 4xx" $ do
-      e <- newEnv
-      let h =
-            handleWithStubs
-              e
-              [ makeResponseWithStatusForMethod "getUpdates" 400 $
-                successfulResponse [messageUpdateObject]
-              ]
-      T.receiveEvents h `shouldThrow` anyErrorCall
+    it "should not return events if got HTTP status 5xx" $
+      property $ \(HttpStatusCode status) ->
+        inRange (500, 599) status ==> do
+          e <- newEnv
+          let h =
+                handleWithStubs
+                  e
+                  [ makeResponseWithStatusForMethod "getUpdates" status $
+                    successfulResponse [messageUpdateObject]
+                  ]
+          events <- T.receiveEvents h
+          events `shouldBe` []
+    it "should crash if got non (5xx, 2xx) HTTP status" $
+      property $ \(HttpStatusCode status) ->
+        inRange (100, 199) status ||
+        inRange (300, 499) status ==> do
+          e <- newEnv
+          let h =
+                handleWithStubs
+                  e
+                  [ makeResponseWithStatusForMethod "getUpdates" status $
+                    successfulResponse [messageUpdateObject]
+                  ]
+          T.receiveEvents h `shouldThrow` anyErrorCall
     it "should not return events if got response with ok = False" $ do
       e <- newEnv
       let h =
@@ -280,19 +287,21 @@ spec
       T.handleBotResponse h chatId botResponse
       requests <- getRequestsWithMethod e "sendMessage"
       length requests `shouldBe` 2
-    it "should do sendMessage if previous sendMessage resulted in status 5xx" $ do
-      e <- newEnv
-      let chatId = T.ChatId 1
-          botResponse = EchoBot.RepliesResponse ["text1", "text2"]
-          h =
-            handleWithStubs
-              e
-              [ makeResponseWithStatusForMethod "sendMessage" 500 $
-                successfulResponse A.Null
-              ]
-      T.handleBotResponse h chatId botResponse
-      requests <- getRequestsWithMethod e "sendMessage"
-      length requests `shouldBe` 2
+    it "should do sendMessage if previous sendMessage resulted in status 5xx" $
+      property $ \(HttpStatusCode status) ->
+        inRange (500, 599) status ==> do
+          e <- newEnv
+          let chatId = T.ChatId 1
+              botResponse = EchoBot.RepliesResponse ["text1", "text2"]
+              h =
+                handleWithStubs
+                  e
+                  [ makeResponseWithStatusForMethod "sendMessage" status $
+                    successfulResponse A.Null
+                  ]
+          T.handleBotResponse h chatId botResponse
+          requests <- getRequestsWithMethod e "sendMessage"
+          length requests `shouldBe` 2
     it "should do sendMessage if previous sendMessage failed with IO error" $ do
       e <- newEnv
       let chatId = T.ChatId 1
@@ -531,3 +540,16 @@ makeRawResponseForMethod method result request =
   if uriWithMethod method == T.hrURI request
     then Just result
     else Nothing
+
+newtype HttpStatusCode =
+  HttpStatusCode Int
+  deriving (Eq, Ord, Num, Real, Enum, Integral, Show)
+
+instance Bounded HttpStatusCode where
+  minBound = HttpStatusCode 100
+  maxBound = HttpStatusCode 599
+
+instance Arbitrary HttpStatusCode where
+  arbitrary = arbitraryBoundedIntegral
+  shrink (HttpStatusCode code) =
+    [HttpStatusCode z | z <- [code `div` 100 * 100], z /= code]

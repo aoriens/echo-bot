@@ -320,6 +320,15 @@ getResponseWithMethod ::
 getResponseWithMethod h method request =
   getResponseWithMethodAndRequestModifier h method request id
 
+executeMethod ::
+     (A.ToJSON request, Monad m)
+  => Handle m
+  -> ApiMethod
+  -> request
+  -> m (Failable ())
+executeMethod h method request =
+  getResponseWithMethod h method request (const $ pure ())
+
 getResponseWithMethodAndRequestModifier ::
      (A.ToJSON request, Monad m)
   => Handle m
@@ -332,7 +341,7 @@ getResponseWithMethodAndRequestModifier h method request httpRequestModifier par
   Logger.debug h $ "Send " .< method <> ": " .< A.encode request
   httpResult <- hGetHttpResponse h httpRequest
   Logger.debug h $ "Responded with " .< httpResult
-  let result = decodeHttpResult httpResult
+  let result = decodeHttpResult method parser httpResult
   logResult result
   pure result
   where
@@ -345,32 +354,10 @@ getResponseWithMethodAndRequestModifier h method request httpRequestModifier par
           , hrBody = A.encode request
           , hrAdditionalResponseTimeout = 0
           }
-    decodeHttpResult (Left (HttpError e)) = Left $ IOError e
-    decodeHttpResult (Right response@HttpResponse {hrsStatusCode = status})
-      | inRange (200, 299) status = decodeBody $ hrsBody response
-      | inRange (400, 499) status =
-        error $
-        "Method '" ++ apiMethodName method ++ "' returned " ++ show response
-      | otherwise = Left $ HttpStatusError status (hrsStatusText response)
-    decodeBody body =
-      case A.eitherDecode body of
-        Left e -> Left $ JSONError e
-        Right (ErrorResponse desc) -> Left $ ApiError desc
-        Right (ResultResponse value) ->
-          either (Left . JSONError) Right $ A.parseEither parser value
     logResult (Left e) =
       Logger.error h $
       "'" <> T.pack (apiMethodName method) <> "' returned error: " .< e
     logResult _ = pure ()
-
-executeMethod ::
-     (A.ToJSON request, Monad m)
-  => Handle m
-  -> ApiMethod
-  -> request
-  -> m (Failable ())
-executeMethod h method request =
-  getResponseWithMethod h method request (const $ pure ())
 
 endpointURI :: Handle m -> ApiMethod -> String
 endpointURI h (ApiMethod method) =
@@ -378,6 +365,30 @@ endpointURI h (ApiMethod method) =
   where
     urlPrefix = confURLPrefixWithoutTrailingSlash (hConfig h)
     apiToken = T.unpack . confApiToken $ hConfig h
+
+decodeHttpResult ::
+     ApiMethod
+  -> (A.Value -> A.Parser response)
+  -> HttpResult
+  -> Failable response
+decodeHttpResult _ _ (Left (HttpError e)) = Left $ IOError e
+decodeHttpResult method parser (Right response)
+  | inRange (200, 299) status = decodeApiResult parser $ hrsBody response
+  | inRange (500, 599) status =
+    Left $ HttpStatusError status (hrsStatusText response)
+  | otherwise =
+    error $ "Method '" ++ apiMethodName method ++ "' returned " ++ show response
+  where
+    status = hrsStatusCode response
+
+decodeApiResult ::
+     (A.Value -> A.Parser response) -> BS.ByteString -> Failable response
+decodeApiResult parser body =
+  case A.eitherDecode body of
+    Left e -> Left $ JSONError e
+    Right (ErrorResponse desc) -> Left $ ApiError desc
+    Right (ResultResponse value) ->
+      either (Left . JSONError) Right $ A.parseEither parser value
 
 instance Logger.Logger (Handle m) m where
   lowLevelLog = Logger.lowLevelLog . hLogHandle
