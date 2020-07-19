@@ -69,6 +69,10 @@ data Handle m =
   Handle
     { hLogHandle :: Logger.Handle m
     , hGetHttpResponse :: HttpRequest -> m HttpResult
+    -- | An action to introduce a delay when event reading fails. It
+    -- prevents emitting large amount of failing requests in short
+    -- time.
+    , hPauseAfterFailedGettingUpdates :: m ()
     , hStateHandle :: FlexibleState.Handle State m
     , hConfig :: Config
     }
@@ -143,7 +147,7 @@ receiveEvents h = do
     Right (lastId, events) -> do
       modify' h $ \s -> s {stNextUpdateId = maybe nextUpdateId succ lastId}
       concat <$> mapM (getBotEventFromEvent h) events
-    Left _ -> pure []
+    Left _ -> hPauseAfterFailedGettingUpdates h >> pure []
 
 -- | Handles a bot response which is returned by EchoBot and updates
 -- the state.

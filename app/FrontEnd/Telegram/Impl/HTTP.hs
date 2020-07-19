@@ -6,6 +6,7 @@ module FrontEnd.Telegram.Impl.HTTP
   ) where
 
 import Control.Arrow
+import Control.Concurrent
 import Control.Exception
 import qualified Data.ByteString.Lazy as BS
 import Data.IORef
@@ -35,6 +36,8 @@ new logHandle myConfig telegramConfig = do
     T.Handle
       { T.hLogHandle = logHandle
       , T.hGetHttpResponse = getHttpResponse httpManager myConfig
+      , T.hPauseAfterFailedGettingUpdates =
+          threadDelay (1000000 * T.confPollTimeout telegramConfig)
       , T.hStateHandle =
           FlexibleState.Handle
             { FlexibleState.hGet = readIORef stateRef

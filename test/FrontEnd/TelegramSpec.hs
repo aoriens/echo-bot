@@ -224,6 +224,36 @@ spec
                   (Left (T.HttpError "some exception"))
               ]
       T.receiveEvents h `shouldReturn` []
+    it "should wait before next getUpdate if last one failed" $ do
+      e <- newEnv
+      let h =
+            handleWithStubs
+              e
+              [ makeRawResponseForMethod
+                  "getUpdates"
+                  (Left (T.HttpError "some exception"))
+              ]
+      void $ T.receiveEvents h
+      void $ T.receiveEvents h
+      events <-
+        take 3 .
+        filter (\ev -> isRequestWithMethod "getUpdates" ev || isPause ev) <$>
+        getEvents e
+      length events `shouldBe` 3
+      head events `shouldSatisfy` isRequestWithMethod "getUpdates"
+      events !! 1 `shouldSatisfy` isPause
+      events !! 2 `shouldSatisfy` isRequestWithMethod "getUpdates"
+    it "should not wait before next getUpdate if last one succeeded" $ do
+      e <- newEnv
+      let h = handleWithEmptyGetUpdatesResponseStub e
+      void $ T.receiveEvents h
+      void $ T.receiveEvents h
+      events <-
+        take 2 .
+        filter (\ev -> isRequestWithMethod "getUpdates" ev || isPause ev) <$>
+        getEvents e
+      length events `shouldBe` 2
+      events `shouldSatisfy` all (isRequestWithMethod "getUpdates")
     it "should send answerCallbackQuery for each CallbackQuery" $
       property $ \testData -> do
         e <- newEnv
@@ -378,17 +408,22 @@ spec
 data Env =
   Env
     { eState :: IORef T.State
-    , eReverseRequests :: IORef [T.HttpRequest]
+    , eReverseEvents :: IORef [Event]
     }
+
+data Event
+  = ARequestEvent T.HttpRequest
+  | PauseEvent
+  deriving (Show)
 
 newEnv :: IO Env
 newEnv = do
   state <- newIORef T.makeState
   requests <- newIORef []
-  pure Env {eState = state, eReverseRequests = requests}
+  pure Env {eState = state, eReverseEvents = requests}
 
 forgetRequests :: Env -> IO ()
-forgetRequests env = writeIORef (eReverseRequests env) []
+forgetRequests env = writeIORef (eReverseEvents env) []
 
 handleWithEmptyGetUpdatesResponseStub :: Env -> T.Handle IO
 handleWithEmptyGetUpdatesResponseStub env =
@@ -408,6 +443,8 @@ defaultHandle env =
     , T.hGetHttpResponse =
         \request ->
           pure $ error ("No response provided for request: " ++ show request)
+    , T.hPauseAfterFailedGettingUpdates =
+        modifyIORef' (eReverseEvents env) (PauseEvent :)
     , T.hStateHandle =
         FlexibleState.Handle
           { FlexibleState.hGet = readIORef $ eState env
@@ -458,13 +495,28 @@ messageUpdateObjectWithText text =
       A.object ["chat" .= A.object ["id" .= (1 :: Int)], "text" .= text]
     ]
 
+getEvents :: Env -> IO [Event]
+getEvents env = reverse <$> readIORef (eReverseEvents env)
+
 getRequests :: Env -> IO [T.HttpRequest]
-getRequests env = reverse <$> readIORef (eReverseRequests env)
+getRequests = fmap (mapMaybe f) . getEvents
+  where
+    f (ARequestEvent request) = Just request
+    f _ = Nothing
 
 getRequestsWithMethod :: Env -> String -> IO [T.HttpRequest]
 getRequestsWithMethod env apiMethod = filter p <$> getRequests env
   where
     p = (uriWithMethod apiMethod ==) . T.hrURI
+
+isRequestWithMethod :: String -> Event -> Bool
+isRequestWithMethod method (ARequestEvent request) =
+  uriWithMethod method == T.hrURI request
+isRequestWithMethod _ _ = False
+
+isPause :: Event -> Bool
+isPause PauseEvent = True
+isPause _ = False
 
 -- | A function type for calculating a response for some kind of HTTP
 -- requests. It can return Nothing wrapped in the monad to designate
@@ -480,7 +532,7 @@ getHttpResponseWithStubs ::
   -> T.HttpRequest
   -> IO T.HttpResult
 getHttpResponseWithStubs env handlers request = do
-  modifyIORef' (eReverseRequests env) (request :)
+  modifyIORef' (eReverseEvents env) (ARequestEvent request :)
   responses <- catMaybes <$> mapM ($ request) handlers
   pure . fromMaybe fatal $ listToMaybe responses
   where
