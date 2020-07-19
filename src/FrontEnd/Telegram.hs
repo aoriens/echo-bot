@@ -342,7 +342,8 @@ getResponseWithMethodAndRequestModifier ::
   -> (A.Value -> A.Parser response)
   -> m (Failable response)
 getResponseWithMethodAndRequestModifier h method request httpRequestModifier parser = do
-  Logger.debug h $ "Send " .< method <> ": " .< A.encode request
+  Logger.debug h $
+    "Send " <> T.pack (apiMethodName method) <> ": " .< A.encode request
   httpResult <- hGetHttpResponse h httpRequest
   Logger.debug h $ "Responded with " .< httpResult
   let result = decodeHttpResult method parser httpResult
