@@ -18,7 +18,9 @@ module FrontEnd.Telegram
   , ChatId(..)
   , HttpRequest(..)
   , HttpMethod(..)
+  , HttpResult
   , HttpResponse(..)
+  , HttpError(..)
   ) where
 
 import Control.Applicative
@@ -65,7 +67,7 @@ data Config =
 data Handle m =
   Handle
     { hLogHandle :: Logger.Handle m
-    , hGetHttpResponse :: HttpRequest -> m HttpResponse
+    , hGetHttpResponse :: HttpRequest -> m HttpResult
     , hStateHandle :: FlexibleState.Handle State m
     , hConfig :: Config
     }
@@ -85,6 +87,8 @@ data OpenMenu =
     , omTitle :: Text
     , omChoiceMap :: [(CallbackData, EchoBot.Event)]
     }
+
+type HttpResult = Either HttpError HttpResponse
 
 -- | HTTP request value, independent of specific libraries.
 data HttpRequest =
@@ -111,10 +115,15 @@ data HttpResponse =
     }
   deriving (Show)
 
+newtype HttpError =
+  HttpError Text
+  deriving (Show)
+
 data RequestError
   = JSONError String
   | HttpStatusError Int BS.ByteString
   | ApiError Text
+  | IOError Text
   deriving (Show)
 
 type Failable = Either RequestError
@@ -320,9 +329,9 @@ getResponseWithMethodAndRequestModifier ::
   -> m (Failable response)
 getResponseWithMethodAndRequestModifier h method request httpRequestModifier parser = do
   Logger.debug h $ "Send " .< method <> ": " .< A.encode request
-  response <- hGetHttpResponse h httpRequest
-  Logger.debug h $ "Responded with " .< response
-  let result = decodeResponse response
+  httpResult <- hGetHttpResponse h httpRequest
+  Logger.debug h $ "Responded with " .< httpResult
+  let result = decodeHttpResult httpResult
   logResult result
   pure result
   where
@@ -335,7 +344,8 @@ getResponseWithMethodAndRequestModifier h method request httpRequestModifier par
           , hrBody = A.encode request
           , hrAdditionalResponseTimeout = 0
           }
-    decodeResponse response
+    decodeHttpResult (Left (HttpError e)) = Left $ IOError e
+    decodeHttpResult (Right response)
       | responseStatusIsOk (hrsStatusCode response) =
         decodeBody (hrsBody response)
       | otherwise =

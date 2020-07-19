@@ -200,6 +200,17 @@ spec
               ]
       events <- T.receiveEvents h
       events `shouldBe` []
+    it "should not return events if got IO error" $ do
+      e <- newEnv
+      let h =
+            handleWithStubs
+              e
+              [ makeRawResponseForMethod
+                  "getUpdates"
+                  (Left (T.HttpError "some exception"))
+              ]
+      events <- T.receiveEvents h
+      events `shouldBe` []
     it "should send answerCallbackQuery for each CallbackQuery" $
       property $ \testData -> do
         e <- newEnv
@@ -270,6 +281,20 @@ spec
               e
               [ makeResponseWithStatus400ForMethod "sendMessage" $
                 successfulResponse A.Null
+              ]
+      T.handleBotResponse h chatId botResponse
+      requests <- getRequestsWithMethod e "sendMessage"
+      length requests `shouldBe` 2
+    it "should do sendMessage if previous sendMessage failed with IO error" $ do
+      e <- newEnv
+      let chatId = T.ChatId 1
+          botResponse = EchoBot.RepliesResponse ["text1", "text2"]
+          h =
+            handleWithStubs
+              e
+              [ makeRawResponseForMethod
+                  "sendMessage"
+                  (Left (T.HttpError "some error"))
               ]
       T.handleBotResponse h chatId botResponse
       requests <- getRequestsWithMethod e "sendMessage"
@@ -443,7 +468,7 @@ getRequestsWithMethod env apiMethod = filter p <$> getRequests env
 -- | A function type for calculating a response for some kind of HTTP
 -- requests. It can return Nothing wrapped in the monad to designate
 -- that another handler should be tried to generate a response.
-type HttpRequestHandler = T.HttpRequest -> IO (Maybe T.HttpResponse)
+type HttpRequestHandler = T.HttpRequest -> IO (Maybe T.HttpResult)
 
 -- | A stub implementation of HTTP requesting.
 getHttpResponseWithStubs ::
@@ -452,7 +477,7 @@ getHttpResponseWithStubs ::
      -- is returned.
   -> [HttpRequestHandler]
   -> T.HttpRequest
-  -> IO T.HttpResponse
+  -> IO T.HttpResult
 getHttpResponseWithStubs env handlers request = do
   modifyIORef' (eReverseRequests env) (request :)
   responses <- catMaybes <$> mapM ($ request) handlers
@@ -463,7 +488,8 @@ getHttpResponseWithStubs env handlers request = do
 type ApiMethod = String
 
 makeResponseForMethod :: ApiMethod -> A.Value -> HttpRequestHandler
-makeResponseForMethod method json = makeRawResponseForMethod method response
+makeResponseForMethod method json =
+  makeRawResponseForMethod method $ Right response
   where
     response =
       T.HttpResponse
@@ -474,7 +500,7 @@ makeResponseForMethod method json = makeRawResponseForMethod method response
 
 makeResponseWithStatus400ForMethod :: ApiMethod -> A.Value -> HttpRequestHandler
 makeResponseWithStatus400ForMethod method json =
-  makeRawResponseForMethod method response
+  makeRawResponseForMethod method $ Right response
   where
     response =
       T.HttpResponse
@@ -485,14 +511,14 @@ makeResponseWithStatus400ForMethod method json =
 
 makeBadJsonResponseForMethod :: ApiMethod -> HttpRequestHandler
 makeBadJsonResponseForMethod method =
-  makeRawResponseForMethod
-    method
+  makeRawResponseForMethod method $
+  Right
     T.HttpResponse
       {T.hrsBody = "BAD_JSON!", T.hrsStatusCode = 200, T.hrsStatusText = "OK"}
 
-makeRawResponseForMethod :: ApiMethod -> T.HttpResponse -> HttpRequestHandler
-makeRawResponseForMethod method response request =
+makeRawResponseForMethod :: ApiMethod -> T.HttpResult -> HttpRequestHandler
+makeRawResponseForMethod method result request =
   pure $
   if uriWithMethod method == T.hrURI request
-    then Just response
+    then Just result
     else Nothing
