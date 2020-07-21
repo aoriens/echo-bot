@@ -1,4 +1,8 @@
 # This is a sample configuration bot file
+#
+# The configuration format is documented at
+# https://hackage.haskell.org/package/configurator/docs/Data-Configurator.html
+
 core {
   # A reply for /help command
   HelpReply = "This is a simple bot who echoes all you messages. You may also use commands: \"/help\" and \"/repeat\""
@@ -34,17 +38,17 @@ log {
 
 # Telegram front-end configuration
 telegram {
-  # The API token of your telegram bot. Keep it in secret. This is
-  # mandatory.
+  # The API token of your telegram bot. Keep it in secret. The
+  # parameter is mandatory.
   # ApiToken = "123456789:ABABABABABABABABABABABABABABABABABABABABA"
 
   # The server URL prefix. https://api.telegram.org is a default.
   URLPrefix = "https://api.telegram.org"
 
-  # The poll timeout. The telegram server waits that much seconds
-  # before responding if nothing interesting occured. 60 seconds is a
-  # default. Larger values can decrease server load, but they can also
-  # increase time to detect connection failure.
+  # The poll timeout. The telegram server is suggested to wait that
+  # much seconds before responding when nothing interesting occurs. 60
+  # seconds is a default. Larger values can decrease server load, but
+  # they can also increase time to detect connection failure.
   PollTimeout = 600
 
   # The connection timeout. For poll request it is PollTimeout seconds
