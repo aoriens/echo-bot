@@ -16,6 +16,8 @@ import qualified FrontEnd.Telegram.Impl.HTTP
 import qualified Logger
 import qualified Logger.Impl
 import Main.ConfigurationTypes
+import qualified Network.HTTP.Client as HTTP
+import qualified Network.HTTP.Client.TLS as TLS
 import qualified Util.FlexibleState as FlexibleState
 
 main :: IO ()
@@ -34,8 +36,9 @@ runConsoleFrontEnd botHandle =
 runTelegramFrontEnd :: Logger.Handle IO -> IO (EchoBot.Handle IO) -> IO ()
 runTelegramFrontEnd logHandle makeBotHandle = do
   (teleConfig, implConfig) <- Config.getTelegramConfig
+  httpManager <- HTTP.newManager TLS.tlsManagerSettings
   telegramHandle <-
-    FrontEnd.Telegram.Impl.HTTP.new logHandle implConfig teleConfig
+    FrontEnd.Telegram.Impl.HTTP.new httpManager logHandle implConfig teleConfig
   go telegramHandle IntMap.empty
   where
     go telegramHandle botHandles = do

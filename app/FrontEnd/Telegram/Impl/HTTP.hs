@@ -16,7 +16,6 @@ import qualified Data.Text
 import qualified FrontEnd.Telegram as T
 import qualified Logger
 import qualified Network.HTTP.Client as HTTP
-import qualified Network.HTTP.Client.TLS as TLS
 import qualified Network.HTTP.Types.Status as HTTP
 import qualified Network.URI as URI
 import qualified Util.FlexibleState as FlexibleState
@@ -27,10 +26,11 @@ newtype Config =
     { confResponseTimeout :: Int
     }
 
--- | Creates a @FrontEnd.Telegram.Handle@ using http-client.
-new :: Logger.Handle IO -> Config -> T.Config -> IO (T.Handle IO)
-new logHandle myConfig telegramConfig = do
-  httpManager <- HTTP.newManager TLS.tlsManagerSettings
+-- | Creates a @FrontEnd.Telegram.Handle@ using http-client. An HTTP
+-- manager with TLS support is required.
+new ::
+     HTTP.Manager -> Logger.Handle IO -> Config -> T.Config -> IO (T.Handle IO)
+new httpManager logHandle myConfig telegramConfig = do
   stateRef <- newIORef T.makeState
   pure
     T.Handle
