@@ -17,54 +17,57 @@ import qualified Util.FlexibleState as FS
 type Interp = WriterT [(Logger.Level, T.Text)] (S.StateT State IO)
 
 spec :: Spec
-spec =
+spec
+  {- HLINT ignore spec "Reduce duplication" -}
+ =
   describe "respond" $ do
     it "should echo any non-command input back" $
       property $ \str ->
         not (hasCommandPrefix str) ==> do
           let comment = T.pack str
-          let config = stubConfig
-          let h = handleWith config
-          response <- runBotWithConfig config $ respond h (MessageEvent comment)
-          response `shouldBe` RepliesResponse [comment]
+              config = stubConfig
+              h = handleWith config
+          responses <-
+            runBotWithConfig config $ respond h (MessageEvent comment)
+          responses `shouldBe` [MessageResponse comment]
     it
       "should echo a simple message for any specified \
       \amount of times specified in the config" $
       property $ \(NonNegative count) -> do
         let comment = "comment"
-        let config = stubConfig {confRepetitionCount = count}
-        let h = handleWith config
-        response <- runBotWithConfig config $ respond h (MessageEvent comment)
-        response `shouldBe` RepliesResponse (replicate count comment)
+            config = stubConfig {confRepetitionCount = count}
+            h = handleWith config
+        responses <- runBotWithConfig config $ respond h (MessageEvent comment)
+        responses `shouldBe` replicate count (MessageResponse comment)
     it "should output menu for /repeat command" $ do
       let config = stubConfig
       let h = handleWith config
-      response <- runBotWithConfig config $ respond h (MessageEvent "/repeat")
-      response `shouldSatisfy` isMenuResponse
+      responses <- runBotWithConfig config $ respond h (MessageEvent "/repeat")
+      responses `shouldSatisfy` any isMenuResponse
     it "should honor the repetition count set by the user" $ do
       let comment = "comment"
-      let config = stubConfig {confRepetitionCount = 1}
-      let newRepCount = 3
-      let h = handleWith config
-      response <-
+          config = stubConfig {confRepetitionCount = 1}
+          newRepCount = 3
+          h = handleWith config
+      responses <-
         runBotWithConfig config $ do
-          (MenuResponse _ opts) <- respond h $ MessageEvent "/repeat"
+          [MenuResponse _ opts] <- respond h $ MessageEvent "/repeat"
           Just request <- pure $ lookup newRepCount opts
           void $ respond h request
           respond h $ MessageEvent comment
-      response `shouldBe` RepliesResponse (replicate newRepCount comment)
+      responses `shouldBe` replicate newRepCount (MessageResponse comment)
     it "should output the help text for /help command" $ do
       let helpText = "My help text"
       let config = stubConfig {confHelpReply = helpText}
       let h = handleWith config
-      response <- runBotWithConfig config $ respond h $ MessageEvent "/help"
-      response `shouldBe` RepliesResponse [helpText]
+      responses <- runBotWithConfig config $ respond h $ MessageEvent "/help"
+      responses `shouldBe` [MessageResponse helpText]
     it "should output the predefined menu title for /repeat command" $ do
       let title = "My title"
       let config = stubConfig {confRepeatReply = title}
       let h = handleWith config
-      response <- runBotWithConfig config $ respond h $ MessageEvent "/repeat"
-      response `shouldSatisfy` isMenuResponseWithTitle title
+      responses <- runBotWithConfig config $ respond h $ MessageEvent "/repeat"
+      responses `shouldSatisfy` any (isMenuResponseWithTitle title)
     it "should substitute {count} with repetition count in the menu title" $ do
       let config =
             stubConfig
@@ -72,8 +75,9 @@ spec =
               , confRepetitionCount = 3
               }
       let h = handleWith config
-      response <- runBotWithConfig config $ respond h $ MessageEvent "/repeat"
-      response `shouldSatisfy` isMenuResponseWithTitle "My count is 3, {right}."
+      responses <- runBotWithConfig config $ respond h $ MessageEvent "/repeat"
+      responses `shouldSatisfy`
+        any (isMenuResponseWithTitle "My count is 3, {right}.")
     it "should parse a command with trailing and leading spaces" $ do
       shouldRecognizeHelpCommand "/help "
       shouldRecognizeHelpCommand "  /help "
@@ -106,7 +110,7 @@ shouldRecognizeHelpCommandOrNot matchOrNot input = do
   let config = stubConfig {confHelpReply = helpText}
   let h = handleWith config
   response <- runBotWithConfig config $ respond h $ MessageEvent input
-  let expected = RepliesResponse [helpText]
+  let expected = [MessageResponse helpText]
   if matchOrNot
     then response `shouldBe` expected
     else response `shouldNotBe` expected

@@ -287,13 +287,11 @@ spec
         receivedIds `shouldMatchList`
           map (\(cqId, _, _, _, _) -> Just $ A.toJSON cqId) testData
   describe "handleBotResponse" $ do
-    it
-      "should send a message to the correct chat for each entry in \
-      \a EchoBot.RepliesResponse" $
-      property $ \rawChatId strings -> do
+    it "should send a message to the correct chat for EchoBot.MessageResponse" $
+      property $ \rawChatId string -> do
         e <- newEnv
         let chatId = T.ChatId rawChatId
-            botResponse = EchoBot.RepliesResponse $ map T.pack strings
+            botResponse = EchoBot.MessageResponse $ T.pack string
             h =
               handleWithStubs
                 e
@@ -302,16 +300,18 @@ spec
                 ]
         T.handleBotResponse h chatId botResponse
         rBodies <- bodies <$> getRequestsWithMethod e "sendMessage"
-        map (HM.lookup "text") rBodies `shouldBe` map (Just . A.toJSON) strings
-        map (HM.lookup "chat_id") rBodies `shouldSatisfy`
-          all (Just (A.toJSON rawChatId) ==)
+        rBodies `shouldSatisfy`
+          any
+            (\body ->
+               HM.lookup "text" body == Just (A.toJSON string) &&
+               HM.lookup "chat_id" body == Just (A.toJSON rawChatId))
     it
       "should do sendMessage if previous sendMessage resulted in malformed response" $ do
       e <- newEnv
       let chatId = T.ChatId 1
-          botResponse = EchoBot.RepliesResponse ["text1", "text2"]
           h = handleWithStubs e [makeBadJsonResponseForMethod "sendMessage"]
-      T.handleBotResponse h chatId botResponse
+      T.handleBotResponse h chatId (EchoBot.MessageResponse "text1")
+      T.handleBotResponse h chatId (EchoBot.MessageResponse "text2")
       requests <- getRequestsWithMethod e "sendMessage"
       length requests `shouldBe` 2
     it "should do sendMessage if previous sendMessage resulted in status 5xx" $
@@ -319,20 +319,19 @@ spec
         inRange (500, 599) status ==> do
           e <- newEnv
           let chatId = T.ChatId 1
-              botResponse = EchoBot.RepliesResponse ["text1", "text2"]
               h =
                 handleWithStubs
                   e
                   [ makeResponseWithStatusForMethod "sendMessage" status $
                     successfulResponse A.Null
                   ]
-          T.handleBotResponse h chatId botResponse
+          T.handleBotResponse h chatId (EchoBot.MessageResponse "text1")
+          T.handleBotResponse h chatId (EchoBot.MessageResponse "text2")
           requests <- getRequestsWithMethod e "sendMessage"
           length requests `shouldBe` 2
     it "should do sendMessage if previous sendMessage failed with IO error" $ do
       e <- newEnv
       let chatId = T.ChatId 1
-          botResponse = EchoBot.RepliesResponse ["text1", "text2"]
           h =
             handleWithStubs
               e
@@ -340,7 +339,8 @@ spec
                   "sendMessage"
                   (Left (T.HttpError "some error"))
               ]
-      T.handleBotResponse h chatId botResponse
+      T.handleBotResponse h chatId (EchoBot.MessageResponse "text1")
+      T.handleBotResponse h chatId (EchoBot.MessageResponse "text2")
       requests <- getRequestsWithMethod e "sendMessage"
       length requests `shouldBe` 2
     it

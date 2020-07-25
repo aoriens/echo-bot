@@ -152,9 +152,8 @@ receiveEvents h = do
 handleBotResponse :: Monad m => Handle m -> ChatId -> EchoBot.Response -> m ()
 handleBotResponse h chatId response = do
   case response of
-    EchoBot.RepliesResponse texts -> mapM_ (sendMessage h chatId) texts
+    EchoBot.MessageResponse text -> void $ sendMessage h chatId text
     EchoBot.MenuResponse title opts -> openMenu h chatId title opts
-    EchoBot.EmptyResponse -> pure ()
 
 receiveLowLevelEvents ::
      Monad m => Handle m -> UpdateId -> m (Failable (Maybe UpdateId, [Event]))

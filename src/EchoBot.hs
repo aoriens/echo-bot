@@ -54,14 +54,13 @@ data Event
 
 -- | Bot reaction to a request.
 data Response
-  -- | A command to output several text comments for the user. Each
-  -- element in the list is to be output as a separate message.
-  = RepliesResponse [Text]
+  -- | A command to output a comment for the user. Each comment is to
+  -- be output as a separate message.
+  = MessageResponse Text
   -- | A command to output a menu with the given title and options.
   -- Each option is paired with the corresponding request to perform
   -- on selection.
   | MenuResponse Text [(Int, Event)]
-  | EmptyResponse
   deriving (Eq, Show)
 
 -- | An intermediate state of the bot.
@@ -83,7 +82,7 @@ checkConfig conf =
     else Right ()
 
 -- | Evaluates a response for the passed request.
-respond :: (Monad m) => Handle m -> Event -> m Response
+respond :: (Monad m) => Handle m -> Event -> m [Response]
 respond h (SetRepetitionCountEvent repetitionCount) =
   handleSettingRepetitionCount h repetitionCount
 respond h (MessageEvent text)
@@ -93,12 +92,12 @@ respond h (MessageEvent text)
   where
     isCommand cmd = startsWithWord cmd $ T.stripStart text
 
-handleHelpCommand :: (Monad m) => Handle m -> m Response
+handleHelpCommand :: (Monad m) => Handle m -> m [Response]
 handleHelpCommand h = do
   Logger.info h "Got help command"
-  pure $ RepliesResponse [confHelpReply . hConfig $ h]
+  pure [MessageResponse . confHelpReply $ hConfig h]
 
-handleSettingRepetitionCount :: (Monad m) => Handle m -> Int -> m Response
+handleSettingRepetitionCount :: (Monad m) => Handle m -> Int -> m [Response]
 handleSettingRepetitionCount h count = do
   Logger.info h $ "User set repetition count to " .< count
   when (count < minRepetitionCount || count > maxRepetitionCount) $ do
@@ -106,13 +105,13 @@ handleSettingRepetitionCount h count = do
       "Suspicious new repetition count to be set, too little or large: " .<
       count
   modify' (hStateHandle h) $ \s -> s {stRepetitionCount = count}
-  pure EmptyResponse
+  pure []
 
-handleRepeatCommand :: (Monad m) => Handle m -> m Response
+handleRepeatCommand :: (Monad m) => Handle m -> m [Response]
 handleRepeatCommand h = do
   Logger.info h "Got repeat command"
   title <- repeatCommandReply h
-  pure $ MenuResponse title choices
+  pure [MenuResponse title choices]
   where
     choices =
       map
@@ -131,12 +130,12 @@ minRepetitionCount = 1
 
 maxRepetitionCount = 5
 
-respondWithEchoedComment :: (Monad m) => Handle m -> Text -> m Response
+respondWithEchoedComment :: (Monad m) => Handle m -> Text -> m [Response]
 respondWithEchoedComment h comment = do
   Logger.info h $ "Echoing user input: '" <> comment <> "'"
   count <- stRepetitionCount <$> get (hStateHandle h)
   Logger.debug h $ "Current repetition count is " .< count
-  pure . RepliesResponse . replicate count $ comment
+  pure . replicate count $ MessageResponse comment
 
 -- | Determines whether the text starts with a given word. A word is
 -- considered as a substring with a trailing whitespace after it or

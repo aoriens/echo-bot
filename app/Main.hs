@@ -47,8 +47,8 @@ runTelegramFrontEnd logHandle makeBotHandle = do
       go telegramHandle botHandles'
     handleEvent telegramHandle botHandles (chatId, event) = do
       (botHandle, botHandles') <- getBotHandleForChat botHandles chatId
-      r <- EchoBot.respond botHandle event
-      Telegram.handleBotResponse telegramHandle chatId r
+      EchoBot.respond botHandle event >>=
+        mapM_ (Telegram.handleBotResponse telegramHandle chatId)
       pure botHandles'
     getBotHandleForChat botHandles (Telegram.ChatId chatId) =
       case IntMap.lookup chatId botHandles of

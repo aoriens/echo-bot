@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, LambdaCase #-}
 
 -- | The console front-end is responsible for console I/O and
 -- appropriate handling of other high-level bot interactions (menu
@@ -30,11 +30,11 @@ run h = do
 
 sendRequestToBotAndHandleOutput :: Handle -> EchoBot.Event -> IO ()
 sendRequestToBotAndHandleOutput h request = do
-  response <- EchoBot.respond (hBotHandle h) request
-  case response of
-    EchoBot.RepliesResponse texts -> mapM_ TIO.putStrLn texts
-    EchoBot.MenuResponse title opts -> handleMenuResponse h title opts
-    EchoBot.EmptyResponse -> pure ()
+  EchoBot.respond (hBotHandle h) request >>=
+    mapM_
+      (\case
+         EchoBot.MessageResponse text -> TIO.putStrLn text
+         EchoBot.MenuResponse title opts -> handleMenuResponse h title opts)
 
 getLineWithPrompt :: Text -> IO Text
 getLineWithPrompt prompt = do
