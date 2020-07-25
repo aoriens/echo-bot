@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings, FlexibleInstances, LambdaCase #-}
 
 -- | A module to provide a configuration reader for other modules.
 module Config
@@ -8,6 +8,7 @@ module Config
   , getFrontEndConfig
   ) where
 
+import Control.Exception
 import Control.Monad.Reader
 import qualified Data.Configurator as C
 import qualified Data.Configurator.Types as C
@@ -20,7 +21,6 @@ import qualified Logger.Impl
 import qualified Main.ConfigurationTypes as Main
 import System.Environment
 import System.IO
-import System.IO.Error
 
 -- | Gets the bot config. In any case it can provide reasonable
 -- default values.
@@ -75,10 +75,14 @@ getFrontEndConfig =
 
 openLogFile :: FilePath -> IO Handle
 openLogFile "" = pure stderr
-openLogFile path = do
-  openFile path AppendMode `catchIOError` \e -> do
-    hPutStrLn stderr $ "Error while opening log: " ++ show e
-    pure stderr
+openLogFile path =
+  try (openFile path AppendMode) >>= \case
+    Right h -> pure h
+    Left e -> do
+      let _ = (e :: IOException)
+      hPutStrLn stderr $
+        "Error while opening log, falling back to stderr: " ++ show e
+      pure stderr
 
 withConfigFileSection :: C.Name -> ReaderT C.Config IO a -> IO a
 withConfigFileSection section m = do
