@@ -11,9 +11,7 @@ import qualified Data.Text as T
 import EchoBot
 import qualified Logger
 import Test.Hspec
-import Test.Hspec.QuickCheck
 import Test.QuickCheck
-import Test.QuickCheck.Monadic
 import qualified Util.FlexibleState as FS
 
 type Interp = WriterT [(Logger.Level, T.Text)] (S.StateT State IO)
@@ -21,25 +19,23 @@ type Interp = WriterT [(Logger.Level, T.Text)] (S.StateT State IO)
 spec :: Spec
 spec =
   describe "respond" $ do
-    prop "should echo any non-command input back" $ \str ->
-      monadicIO $ do
-        pre $ not . hasCommandPrefix $ str
-        let comment = T.pack str
-        let config = stubConfig
-        let h = handleWith config
-        response <-
-          run $ runBotWithConfig config $ respond h (MessageEvent comment)
-        assert $ response == RepliesResponse [comment]
-    prop
+    it "should echo any non-command input back" $
+      property $ \str ->
+        not (hasCommandPrefix str) ==> do
+          let comment = T.pack str
+          let config = stubConfig
+          let h = handleWith config
+          response <- runBotWithConfig config $ respond h (MessageEvent comment)
+          response `shouldBe` RepliesResponse [comment]
+    it
       "should echo a simple message for any specified \
-      \amount of times specified in the config" $ \(NonNegative count) ->
-      monadicIO $ do
+      \amount of times specified in the config" $
+      property $ \(NonNegative count) -> do
         let comment = "comment"
         let config = stubConfig {confRepetitionCount = count}
         let h = handleWith config
-        response <-
-          run $ runBotWithConfig config $ respond h (MessageEvent comment)
-        assert $ response == RepliesResponse (replicate count comment)
+        response <- runBotWithConfig config $ respond h (MessageEvent comment)
+        response `shouldBe` RepliesResponse (replicate count comment)
     it "should output menu for /repeat command" $ do
       let config = stubConfig
       let h = handleWith config
