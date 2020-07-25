@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving,
-  MultiParamTypeClasses, FlexibleInstances #-}
+  MultiParamTypeClasses, FlexibleInstances, LambdaCase #-}
 
 -- | The module connects the bot business logic and the Telegram
 -- messenger protocol. It is to be isolated from concrete libraries
@@ -26,8 +26,6 @@ module FrontEnd.Telegram
 import Control.Applicative
 import Control.Arrow
 import Control.Monad
-import Control.Monad.Trans.Class
-import Control.Monad.Trans.Maybe
 import qualified Data.Aeson as A
 import Data.Aeson ((.:), (.:?), (.=))
 import qualified Data.Aeson.Types as A
@@ -178,45 +176,45 @@ getBotEventFromEvent ::
      Monad m => Handle m -> Event -> m [(ChatId, EchoBot.Event)]
 getBotEventFromEvent _ (MessageEvent message) =
   pure [(messageChatId message, EchoBot.MessageEvent $ messageText message)]
-getBotEventFromEvent h (MenuChoiceEvent callbackQuery) =
-  fmap maybeToList . runMaybeT $ do
-    confirmToServer
-    menu <- findOpenMenuOrExit
-    exitIfBadMessageId menu
-    botRequest <- findBotRequestMatchingChoiceOrExit menu
-    lift $
-      closeMenuAddingTitleSuffix
-        h
-        (cqChatId callbackQuery)
-        "\n(You have already made your choice)"
-    pure (chatId, botRequest)
+getBotEventFromEvent h (MenuChoiceEvent callbackQuery) = do
+  confirmToServer
+  findOpenMenuForChatId h chatId >>= \case
+    Nothing -> endWithNoOpenMenu
+    Just menu
+      | menuMessageIdIsWrong menu -> endWithBadMessageId menu
+      | otherwise ->
+        case findBotEventMatchingChoice menu of
+          Nothing -> endWithWrongButton
+          Just botEvent -> do
+            closeMenuAddingTitleSuffix
+              h
+              (cqChatId callbackQuery)
+              "\n(You have already made your choice)"
+            pure [(chatId, botEvent)]
   where
     confirmToServer =
-      void . lift . sendAnswerCallbackQueryRequest h $ cqId callbackQuery
-    findOpenMenuOrExit = do
-      menus <- lift $ gets h stOpenMenus
-      maybe exitWithNoOpenMenu pure $ IntMap.lookup menuKey menus
-    exitIfBadMessageId menu =
-      when (cqMessageId callbackQuery /= omMessageId menu) $
-      exitWithBadMessageId menu
-    findBotRequestMatchingChoiceOrExit menu =
-      maybe exitWithWrongButton pure . lookup (cqData callbackQuery) $
-      omChoiceMap menu
-    exitWithNoOpenMenu = do
-      lift . Logger.warn h $
+      void . sendAnswerCallbackQueryRequest h $ cqId callbackQuery
+    menuMessageIdIsWrong menu = cqMessageId callbackQuery /= omMessageId menu
+    findBotEventMatchingChoice menu =
+      lookup (cqData callbackQuery) $ omChoiceMap menu
+    endWithNoOpenMenu = do
+      Logger.warn h $
         "There is no active menu for " .< chatId <>
         ", but menu choice query is given: " .< callbackQuery
-      empty
-    exitWithBadMessageId menu = do
-      lift . Logger.warn h $
+      pure []
+    endWithBadMessageId menu = do
+      Logger.warn h $
         "MessageId from " .< callbackQuery <>
         " mismatches open menu: " .< omMessageId menu
-      empty
-    exitWithWrongButton = do
-      lift . Logger.warn h $ "Invalid menu choice: " .< callbackQuery
-      empty
-    menuKey = unChatId chatId
+      pure []
+    endWithWrongButton = do
+      Logger.warn h $ "Invalid menu choice: " .< callbackQuery
+      pure []
     chatId = cqChatId callbackQuery
+
+findOpenMenuForChatId :: Monad m => Handle m -> ChatId -> m (Maybe OpenMenu)
+findOpenMenuForChatId h (ChatId chatId) =
+  gets h $ IntMap.lookup chatId . stOpenMenus
 
 -- | Sends a menu with repetition count options. Currently no other
 -- menus are implemented.
