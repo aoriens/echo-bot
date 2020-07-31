@@ -46,7 +46,7 @@ executable echo-bot-exe
       Main.ConfigurationTypes
   hs-source-dirs:
       app
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -rtsopts
   build-depends:
       aeson
     , base >=4.7 && <5
@@ -73,7 +73,7 @@ test-suite echo-bot-test
       FrontEnd.TelegramSpec
   hs-source-dirs:
       test
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -rtsopts
   build-depends:
       QuickCheck
     , aeson
